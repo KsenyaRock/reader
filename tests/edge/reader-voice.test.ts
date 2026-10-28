@@ -229,3 +229,28 @@ test("progress: зберігає й читає позицію за профіл�
   x = fake();
   expect((await handle(post({ action: "progress_set", code: "bad", profile: "К", book: "known000001", pos: 1, total: 2 }), ENV, x.f)).status).toBe(401);
 });
+
+test("run: Apple іде в окремий репозиторій зі своїм токеном і гілкою, інші голоси лишаються в основному", async () => {
+  const env2 = { ...ENV, GITHUB_REPO_APPLE: "o/apple-repo", GITHUB_PAT_APPLE: "ghp-apple", GITHUB_REF_APPLE: "main" };
+  let x = fake();
+  await handle(post({ action: "run", code: "good-code", key: KEY, gender: "apple" }), env2, x.f);
+  let gh = x.calls.find(c => c.url.includes("api.github.com"))!;
+  expect(gh.url).toBe("https://api.github.com/repos/o/apple-repo/actions/workflows/voice.yml/dispatches");
+  expect(gh.headers.Authorization).toBe("Bearer ghp-apple");
+  expect(gh.body.ref).toBe("main");
+  x = fake();
+  await handle(post({ action: "run", code: "good-code", key: KEY, gender: "male" }), env2, x.f);
+  gh = x.calls.find(c => c.url.includes("api.github.com"))!;
+  expect(gh.url).toContain("/repos/abohdanovskyi/reader-app/");
+  expect(gh.headers.Authorization).toBe("Bearer ghp-test");
+  expect(gh.body.ref).toBe("dev");
+});
+
+test("cancel: з окремим Apple-репозиторієм шукає запуски в обох", async () => {
+  const env2 = { ...ENV, GITHUB_REPO_APPLE: "o/apple-repo", GITHUB_PAT_APPLE: "ghp-apple" };
+  const x = fake({ runs: [555] });
+  const r = await handle(post({ action: "cancel", code: "good-code", id: 42 }), env2, x.f);
+  expect(r.status).toBe(200);
+  expect(x.calls.some(c => c.url.includes("/repos/o/apple-repo/actions/workflows/voice.yml/runs"))).toBe(true);
+  expect(x.calls.some(c => c.url.includes("/repos/abohdanovskyi/reader-app/actions/workflows/voice.yml/runs"))).toBe(true);
+});

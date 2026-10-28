@@ -1,7 +1,8 @@
 // Edge Function «reader-voice»: запуск хмарної озвучки з читалки. Вимкнути «Verify JWT» (доступ за кодом запуску).
 // Дії (POST JSON {action, code, ...}): check, presign, run, list, delete, cancel, progress_get, progress_set.
 // Секрети функції (Dashboard -> Edge Functions -> Secrets): R2_ENDPOINT, R2_BUCKET, R2_KEY_ID, R2_SECRET, R2_PUBLIC_BASE, GITHUB_PAT,
-// необов'язково GITHUB_REPO (abohdanovskyi/reader-app) і GITHUB_REF (dev). SUPABASE_URL і SUPABASE_SERVICE_ROLE_KEY Supabase додає сам.
+// необов'язково GITHUB_REPO (abohdanovskyi/reader-app) і GITHUB_REF (dev);
+// для Apple-голосів в іншому репозиторії: GITHUB_REPO_APPLE, GITHUB_PAT_APPLE (інакше GITHUB_PAT), GITHUB_REF_APPLE. SUPABASE_URL і SUPABASE_SERVICE_ROLE_KEY Supabase додає сам.
 // Усі значення беруться лише зі змінних середовища, у коді секретів немає.
 
 const MAX_EPUB = 150 * 1024 * 1024;
@@ -108,15 +109,20 @@ export async function handle(req: Request, env: Env, f: typeof fetch = fetch, no
     const c = await rpc("reader_job_cancel", { p_id: id });
     if (!c.ok) return json(502, { ok: false, error: "Не вдалося скасувати задачу" });
     if (c.data !== true) return json(404, { ok: false, error: "Задача вже завершилась" });
-    const repo = env.GITHUB_REPO || "abohdanovskyi/reader-app";
-    const gh = { Authorization: "Bearer " + env.GITHUB_PAT, Accept: "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28", "User-Agent": "reader-voice" };
+    // основний репозиторій і (якщо задано) окремий для Apple-голосів
+    const targets = [{ repo: env.GITHUB_REPO || "abohdanovskyi/reader-app", pat: env.GITHUB_PAT }];
+    if (env.GITHUB_REPO_APPLE && env.GITHUB_REPO_APPLE !== targets[0].repo) targets.push({ repo: env.GITHUB_REPO_APPLE, pat: env.GITHUB_PAT_APPLE || env.GITHUB_PAT });
     let stopped = 0;
-    for (const st of ["in_progress", "queued"]) {
-      const r = await f(`https://api.github.com/repos/${repo}/actions/workflows/voice.yml/runs?status=${st}&per_page=5`, { headers: gh }).catch(() => null);
-      const runs = r && r.ok ? ((await r.json().catch(() => null))?.workflow_runs || []) : [];
-      for (const run of runs) {
-        const x = await f(`https://api.github.com/repos/${repo}/actions/runs/${Number(run.id)}/cancel`, { method: "POST", headers: gh }).catch(() => null);
-        if (x && x.status === 202) stopped++;
+    for (const t of targets) {
+      const repo = t.repo;
+      const gh = { Authorization: "Bearer " + t.pat, Accept: "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28", "User-Agent": "reader-voice" };
+      for (const st of ["in_progress", "queued"]) {
+        const r = await f(`https://api.github.com/repos/${repo}/actions/workflows/voice.yml/runs?status=${st}&per_page=5`, { headers: gh }).catch(() => null);
+        const runs = r && r.ok ? ((await r.json().catch(() => null))?.workflow_runs || []) : [];
+        for (const run of runs) {
+          const x = await f(`https://api.github.com/repos/${repo}/actions/runs/${Number(run.id)}/cancel`, { method: "POST", headers: gh }).catch(() => null);
+          if (x && x.status === 202) stopped++;
+        }
       }
     }
     return json(200, { ok: true, stopped });
@@ -154,12 +160,15 @@ export async function handle(req: Request, env: Env, f: typeof fetch = fetch, no
       return json(502, { ok: false, error: "Не вдалося створити задачу" });
     }
     const id = job.data;
-    const repo = env.GITHUB_REPO || "abohdanovskyi/reader-app";
-    const ref = env.GITHUB_REF || "dev";
+    // Apple-голоси (macOS) можуть іти в окремий репозиторій зі своїм токеном і гілкою
+    const useApple = gender === "apple" && !!env.GITHUB_REPO_APPLE;
+    const repo = useApple ? env.GITHUB_REPO_APPLE : (env.GITHUB_REPO || "abohdanovskyi/reader-app");
+    const ref = useApple ? (env.GITHUB_REF_APPLE || env.GITHUB_REF || "dev") : (env.GITHUB_REF || "dev");
+    const pat = useApple ? (env.GITHUB_PAT_APPLE || env.GITHUB_PAT) : env.GITHUB_PAT;
     const gh = await f(`https://api.github.com/repos/${repo}/actions/workflows/voice.yml/dispatches`, {
       method: "POST",
       headers: {
-        Authorization: "Bearer " + env.GITHUB_PAT, Accept: "application/vnd.github+json",
+        Authorization: "Bearer " + pat, Accept: "application/vnd.github+json",
         "X-GitHub-Api-Version": "2022-11-28", "User-Agent": "reader-voice", "Content-Type": "application/json",
       },
       body: JSON.stringify({ ref, inputs: { epub_url: epubUrl, gender, jobs: "12", job_id: String(id) } }),
