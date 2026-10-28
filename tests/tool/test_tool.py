@@ -979,6 +979,8 @@ class CloudJob(unittest.TestCase):
 STUB = os.path.join(HERE, "stub")
 FAKE_SAY = os.path.join(STUB, "fake_say.py")
 FAKE_FFMPEG = os.path.join(STUB, "fake_ffmpeg.py")
+for _f in (FAKE_SAY, FAKE_FFMPEG):      # завантаження через браузер GitHub губить право «виконувати» — повертаємо
+    os.chmod(_f, 0o755)
 
 
 class AppleVoice(unittest.TestCase):
