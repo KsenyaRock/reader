@@ -1,0 +1,61 @@
+name: tests
+
+on:
+  push:
+    branches: [dev, main]
+    paths-ignore: ['**.md', '**.txt', 'LICENSE']
+  pull_request:
+    paths-ignore: ['**.md', '**.txt', 'LICENSE']
+
+# Новий push скасовує ще не завершений запуск тих самих тестів (економить хвилини GitHub Actions).
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  tool:
+    name: Програма озвучки і сайт (unittest)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.12' }
+      - run: pip install mutagen
+      - name: Програма озвучки (EPUB, мови, нарізка, збірка zip)
+        run: python3 -m unittest discover -s tests/tool -v
+      - name: Сайт (версії, маніфест, кеш) і відсутність секретів
+        run: python3 -m unittest discover -s tests/site -v
+
+  sql:
+    name: SQL читалки (Postgres)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env: { POSTGRES_PASSWORD: pg, POSTGRES_DB: rt }
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd pg_isready --health-interval 5s --health-timeout 5s --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get install -y postgresql-client >/dev/null
+      - run: PSQL="psql postgresql://postgres:pg@localhost:5432/rt" tests/sql/run.sh
+
+  client:
+    name: Плеєр у браузері (Playwright)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.12' }
+      - run: pip install playwright mutagen
+      - run: playwright install --with-deps chromium
+      - run: python3 tests/run_client.py
+
+  edge:
+    name: Edge Function озвучки (bun)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - run: tests/edge/run.sh
