@@ -1,0 +1,1357 @@
+<!doctype html>
+<html lang="uk">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, minimum-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#0f1115">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Читалка">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icon-180.png">
+<title>Читалка</title>
+<style>
+:root{--lift:0px;--bg:#0f1115;--card:#1d2027;--text:#f4f5f7;--muted:#8b919c;--accent:#ff8f5a;--on-accent:#1a0f0a;--line:#ffffff1a;--chip:#ffffff18;--track:#ffffff2a;--invert:#f4f5f7;--on-invert:#0f1115;--glow:#3a2230;--shadow:0 8px 24px #00000066;--hero:linear-gradient(135deg,#2a1f3d 0%,#1b2438 100%);color-scheme:dark}
+:root[data-theme=light]{--bg:#f7f5f2;--card:#fff;--text:#17181c;--muted:#6c7079;--accent:#e0642b;--on-accent:#fff;--line:#17181c1a;--chip:#17181c14;--track:#17181c1f;--invert:#17181c;--on-invert:#fff;--glow:#f3dcc9;--shadow:0 8px 28px #3a2a1a26;--hero:#fff;color-scheme:light}
+@media (prefers-color-scheme:light){:root:not([data-theme=dark]){--bg:#f7f5f2;--card:#fff;--text:#17181c;--muted:#6c7079;--accent:#e0642b;--on-accent:#fff;--line:#17181c1a;--chip:#17181c14;--track:#17181c1f;--invert:#17181c;--on-invert:#fff;--glow:#f3dcc9;--shadow:0 8px 28px #3a2a1a26;--hero:#fff;color-scheme:light}}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;background:var(--bg);color:var(--text);font:16px/1.4 -apple-system,"SF Pro Text",system-ui,sans-serif;touch-action:manipulation;-webkit-text-size-adjust:100%}
+body{padding:env(safe-area-inset-top) 0 calc(var(--lift) + env(safe-area-inset-bottom));min-height:100vh}
+.wrap{max-width:520px;margin:0 auto;padding:0 20px}
+button{font:inherit;color:inherit;background:none;border:0;padding:0;cursor:pointer}
+button:active{opacity:.6}
+svg{display:block}
+.libhead{display:flex;align-items:center;justify-content:space-between;padding-top:28px}
+h1{font-size:32px;font-weight:800;letter-spacing:-.02em;margin:0}
+.fab{width:44px;height:44px;border-radius:22px;background:var(--accent);color:var(--on-accent);display:flex;align-items:center;justify-content:center}
+.label{font-size:13px;font-weight:600;color:var(--muted);letter-spacing:.06em;text-transform:uppercase;margin:26px 0 12px}
+.art{border-radius:14px;flex-shrink:0;display:flex;align-items:flex-end;padding:8px;font-weight:800;line-height:1.05;color:#fff7ee;overflow:hidden;letter-spacing:-.01em;word-break:break-word}
+.hero{display:flex;gap:16px;align-items:center;border-radius:22px;padding:16px;background:var(--hero);box-shadow:var(--shadow);cursor:pointer}
+.hero .art{width:96px;height:96px;font-size:11px}
+.hero .info{flex:1;min-width:0}
+.hero .t{font-size:17px;font-weight:700;line-height:1.2}
+.hero .a{font-size:13px;color:var(--muted);margin-top:2px}
+.hero .c{font-size:13px;color:var(--muted);margin-top:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.bar{height:4px;background:var(--track);border-radius:2px;margin-top:8px;overflow:hidden}
+.bar i{display:block;height:100%;background:var(--accent);border-radius:2px}
+.playcirc{width:48px;height:48px;border-radius:24px;background:var(--invert);color:var(--on-invert);display:flex;align-items:center;justify-content:center;flex-shrink:0}
+.book{display:flex;align-items:center;gap:14px;padding:10px 0;cursor:pointer}
+.book .art{width:56px;height:56px;border-radius:10px;font-size:8px;padding:5px}
+.book .info{flex:1;min-width:0}
+.book .t{font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.book .s{color:var(--muted);font-size:13px;margin-top:2px}
+.empty{color:var(--muted);text-align:center;margin:60px 0}
+.status{color:var(--muted);font-size:13px;margin:10px 0;min-height:18px}
+#player{display:none;min-height:100vh;background:linear-gradient(180deg,var(--glow) 0%,var(--bg) 58%);margin:0 -20px;padding:0 24px calc(24px + var(--lift) + env(safe-area-inset-bottom))}
+.ptop{display:flex;align-items:center;justify-content:space-between;height:52px;padding-top:12px}
+.ib{width:44px;height:44px;display:flex;align-items:center;justify-content:center;color:var(--text)}
+.ib.l{justify-content:flex-start}.ib.r{justify-content:flex-end}
+.eyebrow{font-size:12px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+#art{width:min(342px,100%);aspect-ratio:1;margin:28px auto 0;border-radius:22px;font-size:34px;padding:24px;box-shadow:var(--shadow);line-height:1.02}
+.ptitle{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:26px}
+.ptitle .t{font-size:22px;font-weight:800;letter-spacing:-.01em;line-height:1.15}
+.ptitle .a{font-size:15px;color:var(--muted);margin-top:3px}
+.pill{font-size:12px;font-weight:600;color:var(--muted);padding:6px 10px;border-radius:12px;background:var(--chip);white-space:nowrap}
+.rng{-webkit-appearance:none;appearance:none;width:100%;height:24px;background:transparent;margin:0;display:block}
+.rng::-webkit-slider-runnable-track{height:5px;border-radius:3px;background:linear-gradient(to right,var(--accent) var(--p,0%),var(--track) var(--p,0%))}
+.rng::-webkit-slider-thumb{-webkit-appearance:none;width:16px;height:16px;border-radius:8px;background:var(--invert);margin-top:-5.5px}
+.rng::-moz-range-track{height:5px;border-radius:3px;background:var(--track)}
+.rng::-moz-range-progress{height:5px;border-radius:3px;background:var(--accent)}
+.rng::-moz-range-thumb{width:16px;height:16px;border:0;border-radius:8px;background:var(--invert)}
+.times{display:flex;justify-content:space-between;color:var(--muted);font-size:12px;font-weight:500;font-variant-numeric:tabular-nums}
+.ctrl{display:flex;justify-content:space-between;align-items:center;margin:14px 0 0}
+.ctrl button{width:52px;height:52px;display:flex;flex-direction:column;align-items:center;justify-content:center;color:var(--text)}
+.ctrl button small{font-size:10px;font-weight:700;margin-top:-2px}
+.ctrl .play{width:76px;height:76px;border-radius:38px;background:var(--invert);color:var(--on-invert)}
+#playBtn .i-pause{display:none}
+#playBtn[data-state=playing] .i-play{display:none}
+#playBtn[data-state=playing] .i-pause{display:block}
+.tools{display:flex;align-items:center;justify-content:space-between;margin-top:26px}
+.tools button{height:44px;min-width:44px;border-radius:22px;background:var(--chip);color:var(--text);display:flex;align-items:center;justify-content:center;gap:6px;padding:0 12px;font-size:14px;font-weight:700}
+.tools #speedBtn{background:var(--accent);color:var(--on-accent);font-size:15px;font-weight:800;padding:0 18px}
+.tools #sleepLbl:empty{display:none}
+#sleepStatus{text-align:center}
+.sheet{position:fixed;inset:0;z-index:20;display:none}
+.sheet.open{display:block}
+.sheet .bg{position:absolute;inset:0;background:#0009}
+.sheet .body{position:absolute;left:0;right:0;bottom:0;max-height:80vh;overflow:auto;background:var(--card);border-radius:24px 24px 0 0;padding:10px 20px calc(24px + var(--lift) + env(safe-area-inset-bottom));max-width:560px;margin:0 auto;box-shadow:var(--shadow)}
+.grab{width:40px;height:4px;border-radius:2px;background:var(--track);margin:0 auto 14px}
+.sheet h3{margin:0 0 12px;font-size:18px}
+.speedrow{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px}
+.speedrow .val{font-size:26px;font-weight:800}
+.stepb{width:48px;height:48px;border-radius:24px;background:var(--chip);font-size:24px;line-height:1}
+.chips{display:flex;flex-wrap:wrap;gap:8px;margin-top:14px}
+.chips button{padding:9px 14px;font-size:15px;border-radius:20px;background:var(--chip);font-weight:600}
+.chips button.on{background:var(--accent);color:var(--on-accent)}
+.chap{display:flex;justify-content:space-between;gap:10px;padding:13px 4px;border-bottom:1px solid var(--line);cursor:pointer}
+.chap.cur{color:var(--accent);font-weight:700}
+.chap span:last-child{color:var(--muted);font-weight:400;white-space:nowrap;font-variant-numeric:tabular-nums}
+.danger{color:#e5484d;font-weight:600;padding:12px 0}
+.wide{display:block;width:100%;padding:16px;font-size:16px;color:var(--text);margin-bottom:10px}
+.wide.main{background:var(--accent);color:var(--on-accent);font-weight:700}
+.vrow{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:11px 2px;border-bottom:1px solid var(--line);font-size:15px}
+.vrow .n{min-width:0}.vrow .n b{display:block;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.vrow .n small{color:var(--muted);font-size:12px}
+.vrow .pill{color:var(--text)}
+.vbtns{display:flex;gap:6px;flex-shrink:0}
+.vh{margin:16px 0 4px;font-size:12px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
+#voiceCode{width:100%;box-sizing:border-box;font:inherit;font-size:16px;padding:12px;border-radius:12px;border:1px solid var(--line);background:var(--bg);color:var(--text);margin:6px 0 10px}
+#mini{position:fixed;left:12px;right:12px;bottom:calc(16px + var(--lift) + env(safe-area-inset-bottom));max-width:496px;margin:0 auto;height:64px;border-radius:18px;background:var(--card);box-shadow:var(--shadow);display:none;align-items:center;gap:12px;padding:0 10px 0 8px;z-index:10;cursor:pointer}
+#mini .art{width:48px;height:48px;border-radius:10px;font-size:7px;padding:4px}
+#mini .info{flex:1;min-width:0}
+#mini .t{font-size:14px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#mini .s{font-size:12px;color:var(--muted);margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#mini .mbtn{width:44px;height:44px;border-radius:22px;background:var(--accent);color:var(--on-accent);display:flex;align-items:center;justify-content:center}
+#mini[data-state=playing] .i-play,#mini[data-state=paused] .i-pause{display:none}
+#library.hasmini{padding-bottom:calc(96px + var(--lift))}
+#sheetText .body{max-height:90vh;height:90vh;display:flex;flex-direction:column;padding-bottom:calc(12px + env(safe-area-inset-bottom))}
+#textHead{display:flex;align-items:center;gap:8px;margin-bottom:8px}
+#textHead h3{flex:1;margin:0;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:16px}
+#textHead button{min-width:40px;height:40px;border-radius:20px;background:var(--line);color:var(--text);font-size:16px;font-weight:600}
+#textList{flex:1;overflow:auto;-webkit-overflow-scrolling:touch}
+#textList p{margin:0 0 .8em;padding:6px 8px;border-radius:10px;line-height:1.45;cursor:pointer}
+#textList p.cur{background:var(--line);box-shadow:inset 3px 0 0 var(--accent)}
+#toast{position:fixed;left:50%;bottom:calc(40px + var(--lift) + env(safe-area-inset-bottom));transform:translateX(-50%);background:var(--invert);color:var(--on-invert);padding:10px 16px;border-radius:20px;font-size:14px;font-weight:600;opacity:0;pointer-events:none;transition:opacity .25s;z-index:30}
+#toast.show{opacity:1}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<section id="library">
+  <div class="libhead">
+    <h1>Читалка</h1>
+    <button class="fab" id="addBtn" aria-label="Додати книгу"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg></button>
+  </div>
+  <input type="file" id="fileInput" accept=".zip,application/zip" style="display:none">
+  <div class="status" id="importStatus"></div>
+  <div id="newBooks"></div>
+  <div id="heroBox"></div>
+  <div id="books"></div>
+  <p class="status" id="ver" style="text-align:center;margin-top:28px"></p>
+</section>
+
+<section id="player">
+  <div class="ptop">
+    <button class="ib l" id="backBtn" aria-label="До бібліотеки"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></button>
+    <div class="eyebrow">Зараз слухаєте</div>
+    <button class="ib r" id="moreBtn" aria-label="Ще"><svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="5" cy="12" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="19" cy="12" r="1.8"/></svg></button>
+  </div>
+  <div class="art" id="art"></div>
+  <div class="ptitle">
+    <div style="min-width:0">
+      <div class="t" id="pChapterTitle"></div>
+      <div class="a"><span id="pTitle"></span><span id="pAuthorSep"> · </span><span id="pAuthor"></span></div>
+    </div>
+    <div class="pill" id="pChapter"></div>
+  </div>
+  <div style="margin-top:22px">
+    <input type="range" class="rng" id="seek" min="0" max="1000" value="0" aria-label="Позиція в розділі">
+    <div class="times"><span id="tNow">0:00</span><span id="tLeft">-0:00</span></div>
+    <div class="times" id="bookLine" style="justify-content:center;margin-top:8px"></div>
+  </div>
+  <div class="ctrl">
+    <button id="prevCh" aria-label="Попередній розділ"><svg width="28" height="28" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M6 5h2v14H6zM20 5.5v13a.8.8 0 0 1-1.25.66L9.6 12.66a.8.8 0 0 1 0-1.32l9.15-6.5A.8.8 0 0 1 20 5.5Z"/></svg></button>
+    <button id="back15" aria-label="Назад 15 секунд"><svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3.5 12a8.5 8.5 0 1 0 2.6-6.1M3.5 4v4.5H8"/></svg><small>15</small></button>
+    <button class="play" id="playBtn" data-state="paused" aria-label="Грати"><svg class="i-play" width="32" height="32" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5.5v13a1 1 0 0 0 1.5.86l10.5-6.5a1 1 0 0 0 0-1.72L9.5 4.64A1 1 0 0 0 8 5.5Z"/></svg><svg class="i-pause" width="32" height="32" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="6" y="5" width="4.2" height="14" rx="1.3"/><rect x="13.8" y="5" width="4.2" height="14" rx="1.3"/></svg></button>
+    <button id="fwd30" aria-label="Вперед 30 секунд"><svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20.5 12a8.5 8.5 0 1 1-2.6-6.1M20.5 4v4.5H16"/></svg><small>30</small></button>
+    <button id="nextCh" aria-label="Наступний розділ"><svg width="28" height="28" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M16 5h2v14h-2zM4 5.5v13a.8.8 0 0 0 1.25.66l9.15-6.5a.8.8 0 0 0 0-1.32L5.25 4.84A.8.8 0 0 0 4 5.5Z"/></svg></button>
+  </div>
+  <div class="tools">
+    <button id="speedBtn" aria-label="Швидкість">1×</button>
+    <button id="sleepBtn" aria-label="Таймер сну"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 14.5A8.5 8.5 0 0 1 9.5 4a8.5 8.5 0 1 0 10.5 10.5Z"/></svg><span id="sleepLbl"></span></button>
+    <button id="chapBtn" aria-label="Розділи"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" aria-hidden="true"><path d="M8 6h12M8 12h12M8 18h12M4 6h.01M4 12h.01M4 18h.01"/></svg></button>
+    <button id="textBtn" aria-label="Текст" style="display:none;font-weight:700;font-size:17px">Aa</button>
+    <button id="themeBtn" aria-label="Тема"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 3v2M12 19v2M3 12h2M19 12h2M5.6 5.6 7 7M17 17l1.4 1.4M5.6 18.4 7 17M17 7l1.4-1.4"/></svg></button>
+  </div>
+  <div class="status" id="sleepStatus"></div>
+</section>
+
+  <div id="diag" style="display:none;margin:16px 0 100px;position:relative;z-index:15">
+    <textarea id="diagText" readonly rows="10" style="width:100%;font:11px/1.3 ui-monospace,Menlo,monospace;background:var(--bg);color:var(--text);border:1px solid var(--line);border-radius:8px;padding:6px"></textarea>
+    <p><button id="diagCopy" class="pill">Копіювати журнал</button> <button id="diagClear" class="pill">Очистити</button></p>
+  </div>
+
+
+<div class="sheet" id="sheetVoice"><div class="bg"></div><div class="body">
+  <div class="grab"></div><h3>Озвучити книгу</h3>
+  <div id="voiceLogin">
+    <p class="status" style="margin-top:0">Введіть код запуску озвучки (він у Supabase, таблиця reader_settings, поле voice_code).</p>
+    <input id="voiceCode" type="text" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="Код запуску">
+    <button class="pill wide main" id="voiceSave">Зберегти код</button>
+  </div>
+  <div id="voiceMain" style="display:none">
+    <div id="whoBox" style="display:none;margin-bottom:14px">
+      <div class="vh" style="margin-top:0">Хто ви на цьому телефоні?</div>
+      <div class="chips" id="whoChips" style="margin-top:6px"></div>
+    </div>
+    <div id="forBox" style="display:none;margin-bottom:12px">
+      <div class="vh" style="margin-top:0">Для кого книга</div>
+      <div class="chips" id="forChips" style="margin-top:6px"></div>
+    </div>
+    <div class="chips" style="margin:0 0 6px"><button id="vgF" class="on">Жіночий</button><button id="vgM">Чоловічий</button><button id="vgA">Голос Apple</button></div>
+    <p class="status" id="voiceHint" style="margin:0 0 12px"></p>
+    <input type="file" id="voiceFile" accept=".epub,application/epub+zip" style="display:none">
+    <button class="pill wide main" id="voicePick">Вибрати EPUB і озвучити</button>
+    <div class="status" id="voiceStatus"></div>
+    <div id="voiceJobs"></div>
+    <div class="vh" id="voiceBooksH" style="display:none">Готові в хмарі</div>
+    <div id="voiceBooks"></div>
+    <p style="margin:14px 0 0;display:flex;gap:8px;flex-wrap:wrap"><button class="pill" id="voiceProfile"></button><button class="pill" id="voiceChange">Змінити код</button></p>
+  </div>
+</div></div>
+
+<div class="sheet" id="sheetSpeed"><div class="bg"></div><div class="body">
+  <div class="grab"></div><h3>Швидкість</h3>
+  <div class="speedrow"><button class="stepb" id="slower" aria-label="Повільніше">−</button><span class="val" id="speedVal">1.0×</span><button class="stepb" id="faster" aria-label="Швидше">+</button></div>
+  <input type="range" class="rng" id="speedRange" min="0.5" max="3" step="0.05" value="1" aria-label="Швидкість">
+  <div class="chips" id="chips"></div>
+</div></div>
+
+<div class="sheet" id="sheetSleep"><div class="bg"></div><div class="body">
+  <div class="grab"></div><h3>Таймер сну</h3>
+  <div class="chips" id="sleepChips">
+    <button data-min="5">5 хв</button><button data-min="15">15 хв</button><button data-min="30">30 хв</button>
+    <button data-min="45">45 хв</button><button data-min="60">60 хв</button><button data-min="chapter">До кінця розділу</button>
+  </div>
+  <p style="margin:14px 0 0"><button class="pill" id="sleepOff">Вимкнути таймер</button></p>
+</div></div>
+
+<div class="sheet" id="sheetChap"><div class="bg"></div><div class="body">
+  <div class="grab"></div><h3>Розділи</h3>
+  <div id="chapters"></div>
+</div></div>
+
+<div class="sheet" id="sheetText"><div class="bg"></div><div class="body">
+  <div class="grab"></div>
+  <div id="textHead"><button id="textPrev" aria-label="Попередній розділ">‹</button><h3 id="textTitle"></h3><button id="textNext" aria-label="Наступний розділ">›</button><button id="textSmaller" aria-label="Менший шрифт">A−</button><button id="textBigger" aria-label="Більший шрифт">A+</button></div>
+  <div id="textList"></div>
+</div></div>
+
+<div class="sheet" id="sheetMore"><div class="bg"></div><div class="body">
+  <div class="grab"></div><h3>Ще</h3>
+  <input type="file" id="coverInput" accept="image/*" style="display:none">
+  <button class="pill" id="coverBtn" style="display:block;width:100%;padding:14px;font-size:16px;color:var(--text);margin-bottom:6px">Обкладинка з фото</button>
+  <button class="danger" id="delBtn">Видалити книгу з телефону</button>
+  <p class="status" id="skipInfo" style="margin-top:14px"></p>
+  <p class="status" id="ver2" style="margin-top:6px"></p>
+</div></div>
+
+</div>
+<div id="mini" data-state="paused" role="button" aria-label="Відкрити плеєр">
+  <div class="art" id="miniArt"></div>
+  <div class="info"><div class="t" id="miniT"></div><div class="s" id="miniS"></div></div>
+  <button class="mbtn" id="miniBtn" aria-label="Грати/пауза"><svg class="i-play" width="20" height="20" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5.5v13a1 1 0 0 0 1.5.86l10.5-6.5a1 1 0 0 0 0-1.72L9.5 4.64A1 1 0 0 0 8 5.5Z"/></svg><svg class="i-pause" width="20" height="20" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="6" y="5" width="4" height="14" rx="1.2"/><rect x="14" y="5" width="4" height="14" rx="1.2"/></svg></button>
+</div>
+<div id="toast"></div>
+<audio id="audio" preload="auto" playsinline></audio>
+
+<script>
+"use strict";
+const VERSION = "0.13.0";
+const $ = id => document.getElementById(id);
+
+/* ---------- читання zip без завантаження в пам'ять ---------- */
+async function readZip(file) {
+  const size = file.size;
+  const tail = await file.slice(Math.max(0, size - 65557), size).arrayBuffer();
+  const dv = new DataView(tail);
+  let e = -1;
+  for (let i = tail.byteLength - 22; i >= 0; i--) {
+    if (dv.getUint32(i, true) === 0x06054b50) { e = i; break; }
+  }
+  if (e < 0) throw new Error("Це не zip-файл");
+  const count = dv.getUint16(e + 10, true);
+  const cdSize = dv.getUint32(e + 12, true);
+  const cdOff = dv.getUint32(e + 16, true);
+  const cd = await file.slice(cdOff, cdOff + cdSize).arrayBuffer();
+  const c = new DataView(cd);
+  const dec = new TextDecoder();
+  const out = {};
+  let p = 0;
+  for (let i = 0; i < count; i++) {
+    if (c.getUint32(p, true) !== 0x02014b50) throw new Error("Пошкоджений архів");
+    const method = c.getUint16(p + 10, true);
+    const csize = c.getUint32(p + 20, true);
+    const nlen = c.getUint16(p + 28, true);
+    const elen = c.getUint16(p + 30, true);
+    const clen = c.getUint16(p + 32, true);
+    const lho = c.getUint32(p + 42, true);
+    const name = dec.decode(new Uint8Array(cd, p + 46, nlen));
+    out[name] = { method, csize, lho };
+    p += 46 + nlen + elen + clen;
+  }
+  return out;
+}
+async function entryBlob(file, ent, type) {
+  if (ent.method !== 0) throw new Error("Архів стиснений. Потрібен файл, створений програмою озвучки");
+  const lh = new DataView(await file.slice(ent.lho, ent.lho + 30).arrayBuffer());
+  const start = ent.lho + 30 + lh.getUint16(26, true) + lh.getUint16(28, true);
+  return file.slice(start, start + ent.csize, type);
+}
+
+/* ---------- сховище (IndexedDB) ---------- */
+let dbp;
+function db() {
+  if (!dbp) dbp = new Promise((res, rej) => {
+    const r = indexedDB.open("reader", 1);
+    r.onupgradeneeded = () => {
+      r.result.createObjectStore("books", { keyPath: "id" });
+      r.result.createObjectStore("blobs");
+    };
+    r.onsuccess = () => res(r.result);
+    r.onerror = () => rej(r.error);
+  });
+  return dbp;
+}
+async function tx(store, mode, fn) {
+  const d = await db();
+  return new Promise((res, rej) => {
+    const t = d.transaction(store, mode);
+    const out = fn(t.objectStore(store));
+    t.oncomplete = () => res(out && out.result !== undefined ? out.result : undefined);
+    t.onerror = () => rej(t.error || new Error("Помилка запису у сховище"));
+    t.onabort = () => rej(t.error || new Error("Не вдалося записати (мало місця?)"));
+  });
+}
+const getAllBooks = () => tx("books", "readonly", s => s.getAll());
+const getBook = id => tx("books", "readonly", s => s.get(id));
+const putBook = b => tx("books", "readwrite", s => s.put(b));
+const putBlob = (k, b) => tx("blobs", "readwrite", s => s.put(b, k));
+const getBlob = k => tx("blobs", "readonly", s => s.get(k));
+const delBlob = k => tx("blobs", "readwrite", s => s.delete(k));
+const delBook = id => tx("books", "readwrite", s => s.delete(id));
+
+/* ---------- формат часу ---------- */
+function fmt(sec) {
+  sec = Math.max(0, Math.floor(sec || 0));
+  const h = Math.floor(sec / 3600), m = Math.floor(sec % 3600 / 60), s = sec % 60;
+  return h ? `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}` : `${m}:${String(s).padStart(2, "0")}`;
+}
+const bookTotal = b => b.chapters.reduce((a, c) => a + c.duration, 0);
+function bookDone(b) {   // скільки секунд книги прослухано (підтримує і старий формат позиції {ch, t})
+  const p = b.pos || {};
+  if (typeof p.ch === "number") {
+    let d = 0;
+    for (let i = 0; i < p.ch && i < b.chapters.length; i++) d += b.chapters[i].duration;
+    return d + (p.t || 0);
+  }
+  return p.t || 0;
+}
+const once = (el, ...evs) => new Promise(res => {
+  const h = () => { evs.forEach(e => el.removeEventListener(e, h)); res(); };
+  evs.forEach(e => el.addEventListener(e, h));
+});
+
+const audio = $("audio");
+audio.preservesPitch = true; audio.webkitPreservesPitch = true;
+
+async function logStorage(when) {
+  try {
+    const est = await navigator.storage.estimate();
+    const mb = x => Math.round((x || 0) / 1048576) + " МБ";
+    log(`сховище ${when}: зайнято ${mb(est.usage)}, дозволено ${mb(est.quota)}`);
+  } catch (e) { log(`сховище ${when}: оцінка недоступна`); }
+}
+
+function errText(e) {
+  if (!e) return "невідома помилка (мало місця або застосунок було призупинено)";
+  return (e.name ? e.name + ": " : "") + (e.message || String(e));
+}
+
+/* ---------- журнал подій (тап на «Читалка v…») ---------- */
+const LOG_KEY = "readerLog";
+let logLines = [];
+try { logLines = JSON.parse(localStorage.getItem(LOG_KEY) || "[]"); } catch (e) {}
+function log(msg) {
+  const d = new Date();
+  const flags = (audio.paused ? " пауза" : "") + (document.hidden ? " сховано" : "");
+  logLines.push(`${d.toTimeString().slice(0, 8)} ${msg} [t=${(audio.currentTime || 0).toFixed(1)}${flags}]`);
+  if (logLines.length > 150) logLines = logLines.slice(-150);
+  try { localStorage.setItem(LOG_KEY, JSON.stringify(logLines)); } catch (e) {}
+  if ($("diag").style.display !== "none") $("diagText").value = logLines.join("\n");
+}
+function toggleDiag() {
+  const d = $("diag");
+  d.style.display = d.style.display === "none" ? "block" : "none";
+  if (d.style.display === "block") { $("diagText").value = logLines.join("\n"); $("diagText").scrollTop = 1e9; }
+}
+$("ver").onclick = toggleDiag; $("ver2").onclick = toggleDiag;
+$("diagClear").onclick = () => { logLines = []; try { localStorage.removeItem(LOG_KEY); } catch (e) {} $("diagText").value = ""; };
+$("diagCopy").onclick = async () => {
+  try { await navigator.clipboard.writeText(logLines.join("\n")); $("diagCopy").textContent = "Скопійовано ✓"; }
+  catch (e) { $("diagText").select(); $("diagCopy").textContent = "Виділено: скопіюйте вручну"; }
+};
+
+/* ---------- бібліотека ---------- */
+const COVERS = [
+  ["#e8a35c", "#b4472f", "#3a1d3c"], ["#5cb8a5", "#2c6e8f", "#1b2b4d"], ["#9a7bd8", "#5a3f99", "#241a4a"],
+  ["#e6c35c", "#c27a2c", "#4a2a1a"], ["#7aa2ff", "#3d5bd6", "#1a2350"], ["#e57a9a", "#a83a6a", "#321a3c"],
+];
+function coverColors(title) {
+  let h = 0;
+  for (const ch of title || "") h = (h * 31 + ch.charCodeAt(0)) >>> 0;
+  return COVERS[h % COVERS.length];
+}
+function coverFor(title) {
+  const c = coverColors(title);
+  return `linear-gradient(145deg, ${c[0]} 0%, ${c[1]} 55%, ${c[2]} 100%)`;
+}
+const coverUrls = {};
+function coverUrl(book) {
+  if (!book || !book.cover) return null;
+  if (!coverUrls[book.id]) coverUrls[book.id] = URL.createObjectURL(book.cover);
+  return coverUrls[book.id];
+}
+function paintArt(d, book) {   // обкладинка з книги, а без неї кольоровий градієнт із назвою
+  const u = coverUrl(book);
+  if (u) { d.style.background = `center/cover no-repeat url("${u}")`; d.textContent = ""; }
+  else { d.style.background = coverFor(book.title); d.textContent = (book.title || "").toUpperCase().split(/\s+/).filter(Boolean).slice(0, 3).join(" "); }
+}
+function artEl(book, cls) {
+  const d = document.createElement("div");
+  d.className = "art " + (cls || "");
+  paintArt(d, book);
+  return d;
+}
+
+async function renderLibrary() {
+  const books = (await getAllBooks()).sort((a, b) => (b.opened || 0) - (a.opened || 0));
+  const box = $("books"), heroBox = $("heroBox");
+  box.innerHTML = ""; heroBox.innerHTML = "";
+  if (!books.length) {
+    box.innerHTML = '<div class="empty">Поки порожньо.<br>Натисніть <b>+</b> і виберіть EPUB: книгу озвучать у хмарі.</div>';
+    return;
+  }
+  const subtitle = b => {
+    const total = bookTotal(b), done = bookDone(b);
+    return `${b.author ? b.author + " · " : ""}${done > 5 ? "лишилось " + fmt(total - done) : fmt(total)}`;
+  };
+  const h = books[0], total = bookTotal(h), done = bookDone(h);
+  heroBox.innerHTML = '<div class="label">Продовжити</div>';
+  const hero = document.createElement("div");
+  hero.className = "hero";
+  hero.appendChild(artEl(h));
+  const info = document.createElement("div");
+  info.className = "info";
+  info.innerHTML = '<div class="t"></div><div class="a"></div><div class="c"></div><div class="bar"><i></i></div>';
+  info.querySelector(".t").textContent = h.title;
+  info.querySelector(".a").textContent = h.author || "";
+  info.querySelector(".c").textContent = done > 5 ? "Лишилось " + fmt(total - done) : "Тривалість " + fmt(total);
+  info.querySelector(".bar i").style.width = (total ? Math.min(100, done / total * 100) : 0) + "%";
+  hero.appendChild(info);
+  hero.insertAdjacentHTML("beforeend", '<div class="playcirc"><svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5.5v13a1 1 0 0 0 1.5.86l10.5-6.5a1 1 0 0 0 0-1.72L9.5 4.64A1 1 0 0 0 8 5.5Z"/></svg></div>');
+  hero.onclick = () => openBook(h.id, true);
+  heroBox.appendChild(hero);
+  box.insertAdjacentHTML("beforeend", '<div class="label">Книги</div>');
+  for (const b of books) {
+    const el = document.createElement("div");
+    el.className = "book";
+    el.appendChild(artEl(b));
+    const inf = document.createElement("div");
+    inf.className = "info";
+    inf.innerHTML = '<div class="t"></div><div class="s"></div>';
+    inf.querySelector(".t").textContent = b.title;
+    inf.querySelector(".s").textContent = subtitle(b);
+    el.appendChild(inf);
+    el.onclick = () => openBook(b.id, true);
+    box.appendChild(el);
+  }
+}
+
+// масштабування пальцями вимкнено: iOS ігнорує user-scalable, тому гасимо жести й подвійний тап окремо
+["gesturestart", "gesturechange", "gestureend"].forEach(n => document.addEventListener(n, e => e.preventDefault()));
+let lastTap = 0;
+document.addEventListener("touchend", e => { const t = Date.now(); if (t - lastTap < 350 && e.target.closest("button,a,input,textarea") === null) e.preventDefault(); lastTap = t; }, { passive: false });
+$("fileInput").onchange = async ev => {
+  const file = ev.target.files[0];
+  ev.target.value = "";
+  if (file) await importFile(file);
+};
+
+// архів за посиланням читається шматками (HTTP Range): у пам'яті лише один розділ, а не вся книга на 500 МБ
+class RemoteFile {
+  constructor(url, size) { this.url = url; this.size = size; }
+  slice(a, b) {
+    const url = this.url;
+    return {
+      async text() { return new TextDecoder().decode(await this.arrayBuffer()); },
+      async arrayBuffer() {
+        let last = null;
+        for (let attempt = 1; attempt <= 3; attempt++) {
+          try {
+            const r = await fetch(url, { headers: { Range: `bytes=${a}-${b - 1}` } });
+            if (r.status !== 206 && !(r.status === 200 && a === 0)) throw new Error(r.status === 200 ? "сховище не підтримує докачування" : "сервер відповів " + r.status);
+            const buf = await r.arrayBuffer();
+            if (buf.byteLength < b - a) throw new Error("шматок прийшов не повністю");
+            return buf.byteLength > b - a ? buf.slice(0, b - a) : buf;
+          } catch (e) {
+            last = e;
+            await new Promise(res => setTimeout(res, 700 * attempt));
+          }
+        }
+        throw last;
+      },
+    };
+  }
+}
+
+
+async function importFromUrl(url) {
+  if (!url) return;
+  if (!/^https:\/\//i.test(url)) { $("importStatus").textContent = "Посилання має починатися з https://"; return; }
+  const st = $("importStatus");
+  try {
+    st.textContent = "З'єднуюсь…";
+    const head = await fetch(url, { method: "HEAD" });
+    if (!head.ok) throw new Error("сервер відповів " + head.status);
+    const size = parseInt(head.headers.get("content-length") || "0", 10);
+    if (!size) throw new Error("невідомий розмір файлу");
+    log(`додавання за посиланням: ${(size / 1048576).toFixed(0)} МБ`);
+    await importFile(new RemoteFile(url, size));
+  } catch (e) {
+    log("завантаження: помилка " + errText(e));
+    st.textContent = "Не вдалося завантажити: " + errText(e) + ". Перевірте посилання й інтернет та спробуйте ще раз: уже додані розділи не завантажуватимуться заново.";
+  }
+}
+
+/* ---------- озвучка в хмарі: EPUB з телефона -> R2 -> GitHub Actions -> Telegram ---------- */
+async function checkCloudBooks(force) {   // нові книги в хмарі: лише питаємо, самі нічого не додаємо
+  const box = $("newBooks");
+  if (!store.get("voiceCode") || $("library").style.display === "none") return;
+  if (!force && Date.now() - cloudCheckAt < 60000) return;
+  cloudCheckAt = Date.now();
+  let j;
+  try { j = await voiceCall("list"); } catch (e) { return; }
+  takePeople(j);
+  if (PEOPLE.length && !meKey()) return;      // поки не відомо, хто ви, чужі книги не пропонуємо
+  const local = await getAllBooks();
+  const links = new Set(local.map(b => b.link).filter(Boolean));
+  const names = new Set(local.map(b => bookKey(b.title, b.author)));
+  let dismissed = [];
+  try { dismissed = JSON.parse(store.get("dismissedCloud") || "[]"); } catch (e) {}
+  const fresh = (j.books || []).filter(b => b.link && !links.has(b.link) && !names.has(bookKey(b.title, b.author)) && !dismissed.includes(b.link)).slice(0, 3);
+  box.textContent = "";
+  if (!fresh.length) return;
+  const h = document.createElement("div"); h.className = "label"; h.textContent = "Нові книги в хмарі"; box.appendChild(h);
+  for (const b of fresh) {
+    const add = document.createElement("button"); add.className = "pill"; add.textContent = "Додати";
+    const no = document.createElement("button"); no.className = "pill"; no.textContent = "Не потрібна";
+    const row = voiceRow(b.title, [b.author, b.duration_sec ? durText(b.duration_sec) : ""].filter(Boolean).join(" · "), null);
+    const btns = document.createElement("div"); btns.className = "vbtns"; btns.append(add, no); row.appendChild(btns);
+    add.onclick = () => { row.remove(); importFromUrl(b.link); };
+    no.onclick = () => {
+      dismissed.push(b.link); store.set("dismissedCloud", JSON.stringify(dismissed.slice(-200)));
+      row.remove(); if (!box.querySelector(".vrow")) box.textContent = "";
+    };
+    box.appendChild(row);
+  }
+}
+let cloudCheckAt = 0;
+const bookKey = (t, a) => ((t || "") + "|" + (a || "")).toLowerCase().replace(/\s+/g, " ").trim();
+const VOICE_API = "https://hikzqzdulvekuplolymw.supabase.co/functions/v1/reader-voice";
+const store = {
+  get(k) { try { return localStorage.getItem(k) || ""; } catch (e) { return ""; } },
+  set(k, v) { try { localStorage.setItem(k, v); } catch (e) {} },
+};
+const VOICE_HINT = { female: "Поліна · Світлана · Sonia", male: "Остап · Дмитро · Guy", apple: "Леся · Мілена · Samantha (довше й витрачає більше хвилин)" };
+let voiceGender = ["male", "apple"].includes(store.get("voiceGender")) ? store.get("voiceGender") : "female", voiceTimer = null, voiceBusy = false;
+
+async function voiceCall(action, extra) {
+  let r, j = null;
+  try {
+    r = await fetch(VOICE_API, { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(Object.assign({ action, code: store.get("voiceCode"), me: store.get("me") }, extra || {})) });
+    try { j = await r.json(); } catch (e) {}
+  } catch (e) { throw new Error("немає зв'язку з сервером"); }
+  if (!r.ok || !j || !j.ok) throw new Error((j && j.error) || "сервер відповів " + r.status);
+  return j;
+}
+
+/* ---------- люди: «хто я» і «для кого книга» (ключі й підписи приходять із бази, у коді їх немає) ---------- */
+let PEOPLE = [];
+try { PEOPLE = JSON.parse(store.get("people") || "[]"); } catch (e) {}
+const meKey = () => (PEOPLE.some(p => p.key === store.get("me")) ? store.get("me") : "");
+const personLabel = k => (PEOPLE.find(p => p.key === k) || {}).label || "";
+function takePeople(j) {
+  if (!j || !Array.isArray(j.people)) return;
+  PEOPLE = j.people.filter(p => p && typeof p.key === "string" && typeof p.label === "string");
+  store.set("people", JSON.stringify(PEOPLE));
+}
+function forKey() {   // кому призначена нова книга: both, моя або іншого; без налаштованих людей усе спільне
+  if (!PEOPLE.length) return "both";
+  const v = store.get("voiceFor");
+  return v === "both" || PEOPLE.some(p => p.key === v) ? (v || "both") : "both";
+}
+function audienceText(a) {
+  if (!a || a === "both" || !PEOPLE.length) return "";
+  return a === meKey() ? "тільки для вас" : "для: " + personLabel(a);
+}
+function renderPeople() {
+  const has = PEOPLE.length > 0, me = meKey();
+  $("whoBox").style.display = has && !me ? "block" : "none";
+  $("forBox").style.display = has && me ? "block" : "none";
+  $("whoChips").textContent = ""; $("forChips").textContent = "";
+  for (const p of PEOPLE) {
+    const b = document.createElement("button"); b.textContent = p.label;
+    b.onclick = () => { store.set("me", p.key); store.set("profile", p.label); store.set("voiceFor", "both"); renderPeople(); voiceShow(); checkCloudBooks(true); };
+    $("whoChips").appendChild(b);
+  }
+  if (!has || !me) return;
+  const opts = [[me, "Тільки я"], ...PEOPLE.filter(p => p.key !== me).map(p => [p.key, "Тільки " + p.label]), ["both", "Обоє"]];
+  for (const [k, t] of opts) {
+    const b = document.createElement("button"); b.textContent = t; b.className = forKey() === k ? "on" : "";
+    b.onclick = () => { store.set("voiceFor", k); renderPeople(); };
+    $("forChips").appendChild(b);
+  }
+}
+async function epubChars(file) {   // скільки тексту в EPUB (приблизно): HTML-розділи розпаковуємо й рахуємо символи
+  const ents = await readZip(file);
+  let chars = 0;
+  for (const [name, ent] of Object.entries(ents)) {
+    if (!/\.(xhtml|html|htm)$/i.test(name) || ent.csize > 8e6) continue;
+    const lh = new DataView(await file.slice(ent.lho, ent.lho + 30).arrayBuffer());
+    const start = ent.lho + 30 + lh.getUint16(26, true) + lh.getUint16(28, true);
+    const raw = file.slice(start, start + ent.csize);
+    let buf;
+    if (ent.method === 0) buf = await raw.arrayBuffer();
+    else if (ent.method === 8 && typeof DecompressionStream === "function") buf = await new Response(raw.stream().pipeThrough(new DecompressionStream("deflate-raw"))).arrayBuffer();
+    else return 0;
+    chars += new TextDecoder().decode(buf).replace(/<(script|style|head)\b[\s\S]*?<\/\1>/gi, " ").replace(/<[^>]+>/g, " ")
+      .replace(/&[#a-z0-9]+;/gi, " ").replace(/\s+/g, " ").trim().length;
+  }
+  return chars;
+}
+function voiceEstimate(chars, gender) {   // ≈15 символів на секунду звуку; хвилини GitHub: Edge ~72× реального часу, Apple ~112× на macOS (×10)
+  const audio = chars / 15;
+  const mins = gender === "apple" ? (audio / 112 / 60 + 1.5) * 10 : audio / 72 / 60 + 1;
+  return { audio, mins: Math.max(5, Math.round(mins / 5) * 5) };
+}
+const VOICE_NAME = { female: "жіночий", male: "чоловічий", apple: "Apple" };
+function putFile(url, file, onProgress) {
+  return new Promise((resolve, reject) => {
+    const x = new XMLHttpRequest();
+    x.open("PUT", url);
+    x.upload.onprogress = e => { if (e.lengthComputable) onProgress(e.loaded, e.total); };
+    x.onload = () => (x.status >= 200 && x.status < 300) ? resolve() : reject(new Error("сховище відповіло " + x.status));
+    x.onerror = () => reject(new Error("не вдалося завантажити у сховище (перевірте інтернет і CORS бакета)"));
+    x.send(file);
+  });
+}
+const JOB_TXT = { queued: "у черзі", running: "озвучується…", failed: "помилка" };
+function durText(sec) { sec = Math.round(sec || 0); return (sec >= 3600 ? Math.floor(sec / 3600) + " год " : "") + Math.floor(sec % 3600 / 60) + " хв"; }
+function voiceRow(title, sub, btn) {
+  const row = document.createElement("div"); row.className = "vrow";
+  const n = document.createElement("div"); n.className = "n";
+  const b = document.createElement("b"); b.textContent = title;
+  const sm = document.createElement("small"); sm.textContent = sub;
+  n.append(b, sm); row.appendChild(n);
+  if (btn) row.appendChild(btn);
+  return row;
+}
+async function voiceRefresh() {
+  let j;
+  try { j = await voiceCall("list"); } catch (e) { $("voiceStatus").textContent = voiceBusy ? $("voiceStatus").textContent : "Список недоступний: " + errText(e); return; }
+  takePeople(j); renderPeople();
+  const jobs = $("voiceJobs"), books = $("voiceBooks");
+  jobs.textContent = ""; books.textContent = "";
+  for (const t of j.jobs) {
+    let stop = null;
+    if (t.status === "queued" || t.status === "running") {
+      stop = document.createElement("button"); stop.className = "pill"; stop.textContent = "Скасувати";
+      stop.onclick = async () => {
+        if (!confirm(`Скасувати озвучку «${t.title}»? Хвилини, які вже витрачені, не повернуться.`)) return;
+        stop.disabled = true;
+        try { await voiceCall("cancel", { id: t.id }); toast("Озвучку скасовано"); voiceRefresh(); }
+        catch (e) { stop.disabled = false; toast("Не вдалося скасувати: " + errText(e)); }
+      };
+    }
+    jobs.appendChild(voiceRow(t.title, [JOB_TXT[t.status] + (t.status === "failed" && t.error ? ": " + t.error : ""), audienceText(t.audience)].filter(Boolean).join(" · "), stop));
+  }
+  $("voiceBooksH").style.display = j.books.length ? "block" : "none";
+  for (const b of j.books) {
+    const add = document.createElement("button"); add.className = "pill"; add.textContent = "Додати";
+    add.onclick = () => { closeSheets(); importFromUrl(b.link); };
+    const del = document.createElement("button"); del.className = "pill"; del.textContent = "Видалити";
+    del.onclick = async () => {
+      if (!confirm(`Видалити «${b.title}» з хмари назавжди? Копія в читалці на телефоні лишиться.`)) return;
+      del.disabled = true;
+      try { await voiceCall("delete", { id: b.id }); toast("Видалено з хмари"); voiceRefresh(); }
+      catch (e) { del.disabled = false; toast("Не вдалося видалити: " + errText(e)); }
+    };
+    const box = document.createElement("div"); box.className = "vbtns"; box.append(add, del);
+    books.appendChild(voiceRow(b.title, [b.author, b.duration_sec ? durText(b.duration_sec) : "", b.size_mb ? b.size_mb + " МБ" : "", audienceText(b.audience)].filter(Boolean).join(" · "), box));
+  }
+  const active = j.jobs.some(t => t.status === "queued" || t.status === "running");
+  clearTimeout(voiceTimer);
+  if (active && $("sheetVoice").classList.contains("open")) voiceTimer = setTimeout(voiceRefresh, 15000);
+}
+function voiceShow() {
+  const has = !!store.get("voiceCode");
+  $("voiceLogin").style.display = has ? "none" : "block";
+  $("voiceMain").style.display = has ? "block" : "none";
+  $("vgF").classList.toggle("on", voiceGender === "female"); $("vgM").classList.toggle("on", voiceGender === "male");
+  $("vgA").classList.toggle("on", voiceGender === "apple"); $("voiceHint").textContent = VOICE_HINT[voiceGender];
+  renderPeople();
+  $("voiceProfile").textContent = PEOPLE.length ? (meKey() ? "Ви: " + personLabel(meKey()) : "Хто ви?")
+    : store.get("profile") ? "Профіль: " + store.get("profile") : "Синхронізація позиції: вимкнено";
+  if (has) voiceRefresh();
+}
+$("addBtn").onclick = () => { openSheet("sheetVoice"); $("voiceStatus").textContent = ""; voiceShow(); };
+$("voiceSave").onclick = async () => {
+  const code = $("voiceCode").value.trim();
+  if (!code) return;
+  store.set("voiceCode", code);
+  try { await voiceCall("check"); $("voiceCode").value = ""; voiceShow(); toast("Код прийнято"); }
+  catch (e) { store.set("voiceCode", ""); toast(errText(e)); }
+};
+$("voiceProfile").onclick = () => {
+  if (PEOPLE.length) { store.set("me", ""); renderPeople(); return; }
+  const v = prompt("Ім'я профілю для синхронізації позиції між телефонами. На всіх ваших телефонах воно має бути однакове (наприклад, Анна), у різних людей різне. Порожньо: вимкнути.", store.get("profile"));
+  if (v === null) return;
+  store.set("profile", v.trim().slice(0, 40)); voiceShow();
+};
+$("voiceChange").onclick = () => { store.set("voiceCode", ""); clearTimeout(voiceTimer); voiceShow(); };
+$("vgF").onclick = () => { voiceGender = "female"; store.set("voiceGender", voiceGender); voiceShow(); };
+$("vgM").onclick = () => { voiceGender = "male"; store.set("voiceGender", voiceGender); voiceShow(); };
+$("vgA").onclick = () => { voiceGender = "apple"; store.set("voiceGender", voiceGender); voiceShow(); };
+$("voicePick").onclick = () => {
+  if (PEOPLE.length && !meKey()) { toast("Спершу виберіть, хто ви"); renderPeople(); return; }
+  $("voiceFile").click();
+};
+$("voiceFile").onchange = async ev => {
+  const file = ev.target.files[0];
+  ev.target.value = "";
+  if (!file || voiceBusy) return;
+  const st = $("voiceStatus");
+  if (!/\.epub$/i.test(file.name)) { st.textContent = "Потрібен файл .epub"; return; }
+  if (file.size > 150 * 1048576) { st.textContent = "EPUB завеликий (понад 150 МБ)"; return; }
+  voiceBusy = true; $("voicePick").disabled = true;
+  let wake = null;
+  try { if (navigator.wakeLock) wake = await navigator.wakeLock.request("screen"); } catch (e) {}
+  try {
+    st.textContent = "Рахую обсяг книги…";
+    let chars = 0;
+    try { chars = await epubChars(file); } catch (e) { log("оцінка обсягу не вдалась: " + errText(e)); }
+    if (chars > 3000) {
+      const est = voiceEstimate(chars, voiceGender);
+      if (!confirm(`Книга ≈ ${durText(est.audio)} звуку.\nГолос: ${VOICE_NAME[voiceGender]}.${PEOPLE.length && meKey() ? "\nДля кого: " + (forKey() === "both" ? "обоє" : forKey() === meKey() ? "тільки ви" : personLabel(forKey())) + "." : ""} Озвучка витратить приблизно ${est.mins} хв безкоштовного ліміту GitHub (є 2000 на місяць).\n\nЗапустити?`)) {
+        st.textContent = "Скасовано"; return;
+      }
+    }
+    st.textContent = "Готую завантаження…";
+    const p = await voiceCall("presign", { size: file.size });
+    await putFile(p.put_url, file, (a, b) => { st.textContent = "Завантажую EPUB: " + Math.round(a / b * 100) + "%"; });
+    st.textContent = "Запускаю озвучку…";
+    await voiceCall("run", { key: p.key, title: file.name, gender: voiceGender, for: forKey() });
+    st.textContent = "Озвучку запущено. Можна закрити застосунок: коли книга буде готова, прийде повідомлення в Telegram.";
+    log("озвучка запущена: " + file.name);
+  } catch (e) {
+    log("озвучка: помилка " + errText(e));
+    st.textContent = "Не вдалося: " + errText(e);
+    if (/код/i.test(errText(e))) store.set("voiceCode", "");
+  } finally {
+    voiceBusy = false; $("voicePick").disabled = false;
+    try { if (wake) wake.release(); } catch (e) {}
+  }
+  voiceRefresh();
+};
+
+async function importFile(file) {
+  const st = $("importStatus");
+  let wake = null;
+  try { if (navigator.wakeLock) wake = await navigator.wakeLock.request("screen"); } catch (e) {}  // екран не гасне під час імпорту
+  try {
+    st.textContent = "Читаю архів…";
+    await logStorage("перед імпортом");
+    if (navigator.storage && navigator.storage.persist) {   // просимо iOS не чистити сховище застосунку
+      try { log("persist: " + (await navigator.storage.persist())); } catch (e) {}
+    }
+    const entries = await readZip(file);
+    if (!entries["manifest.json"]) throw new Error("У архіві немає manifest.json. Це не книга з програми озвучки");
+    const man = JSON.parse(await (await entryBlob(file, entries["manifest.json"], "application/json")).text());
+    const old = await getBook(man.id);
+    const book = {
+      id: man.id, title: man.title, author: man.author || "", chapters: man.chapters,
+      pos: old ? old.pos : { t: 0 }, opened: Date.now(), added: Date.now(), cover: old ? old.cover : undefined,
+      link: file.url || (old && old.link) || "",          // звідки книгу додано: за цим посиланням знаємо, що вона вже є
+      skipped: man.skipped || (old && old.skipped) || [],  // що не озвучувалось (зміст, авторські права…)
+    };
+    if (man.text && entries["text.json"]) {   // текст для читання разом зі звуком (лише в книгах, озвучених після v0.12)
+      try {
+        const tj = JSON.parse(await (await entryBlob(file, entries["text.json"], "application/json")).text());
+        if (tj && tj.chapters) book.text = tj.chapters;
+      } catch (e) { log("текст не додано: " + errText(e)); }
+    } else if (old && old.text) book.text = old.text;
+    if (man.cover && entries[man.cover]) {
+      try {
+        const buf = await (await entryBlob(file, entries[man.cover], "image/jpeg")).arrayBuffer();
+        const ext = (man.cover.split(".").pop() || "").toLowerCase();
+        book.cover = new Blob([buf], { type: { png: "image/png", gif: "image/gif", webp: "image/webp" }[ext] || "image/jpeg" });
+      } catch (e) { log("обкладинка не додана: " + errText(e)); }
+    }
+    for (let i = 0; i < man.chapters.length; i++) {
+      const c = man.chapters[i];
+      st.textContent = `Додаю: ${i + 1} з ${man.chapters.length}… (не виходьте з застосунку)`;
+      const ent = entries[c.file];
+      if (!ent) throw new Error("У архіві немає файлу " + c.file);
+      const key = `${man.id}/${c.file}`;
+      const have = await getBlob(key).catch(() => null);
+      if (have && have.size === ent.csize) continue;   // цей розділ уже додано: повторний імпорт продовжує з місця зупинки
+      let lastErr = null;
+      for (let attempt = 1; attempt <= 3; attempt++) {
+        try {
+          // читаємо розділ у пам'ять і зберігаємо незалежну копію: не залежимо від файлу в iCloud
+          const buf = await (await entryBlob(file, ent, "audio/mpeg")).arrayBuffer();
+          await putBlob(key, new Blob([buf], { type: "audio/mpeg" }));
+          lastErr = null;
+          break;
+        } catch (err) {
+          lastErr = err;
+          log(`імпорт: розділ ${i + 1}, спроба ${attempt}: ${errText(err)}`);
+          await new Promise(r => setTimeout(r, 500 * attempt));
+        }
+      }
+      if (lastErr) throw lastErr;
+    }
+    await putBook(book);
+    if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {});
+    st.textContent = "Книгу додано ✓";
+    log(`імпорт: «${man.title}», розділів ${man.chapters.length}`);
+    await renderLibrary();
+  } catch (e) {
+    log("імпорт: помилка " + errText(e));
+    await logStorage("після помилки");
+    st.textContent = "Помилка: " + errText(e) + ". Спробуйте «Додати книгу» ще раз: уже додані розділи не завантажуватимуться заново.";
+  } finally {
+    if (wake) { try { wake.release(); } catch (e) {} }
+  }
+}
+
+/* ---------- плеєр: уся книга як один безперервний звук, розділи це позначки часу ---------- */
+let cur = null;        // поточна книга
+let offs = [];         // початки розділів у секундах від початку книги
+let total = 0;         // тривалість усієї книги
+let curCh = -1;        // розділ, що зараз грає
+let streamUrl = null;  // blob-URL звуку книги
+let ready = false;     // позицію застосовано, можна зберігати прогрес
+let speed = parseFloat(localStorage.getItem("speed")) || 1;
+let seeking = false, lastSave = 0;
+let sleepTimer = null, sleepEndAt = 0, sleepUntil = 0, sleepTimeout = null;
+const SPEEDS = [0.75, 1, 1.25, 1.5, 1.75, 2, 2.5, 3];
+
+const chapterAt = T => { for (let k = offs.length - 1; k > 0; k--) if (T >= offs[k] - 0.05) return k; return 0; };
+const chapterEnd = i => (i + 1 < offs.length ? offs[i + 1] : total);
+
+function computeOffsets(book) {
+  offs = []; let s = 0;
+  for (const c of book.chapters) { offs.push(s); s += c.duration; }
+  total = s;
+}
+function rescale(real) {   // якщо тривалості в manifest трохи відрізняються від справжніх, підганяємо пропорційно
+  if (!isFinite(real) || real <= 0 || !total) return;
+  const k = real / total;
+  if (Math.abs(k - 1) < 0.0005 || Math.abs(k - 1) > 0.25) { total = real; return; }
+  offs = offs.map(o => o * k); total = real;
+  log(`розділи підігнано ×${k.toFixed(4)}`);
+}
+
+function setSpeed(v) {
+  speed = Math.min(3, Math.max(0.5, Math.round(v * 20) / 20));
+  audio.playbackRate = speed; audio.defaultPlaybackRate = speed;
+  $("speedVal").textContent = speed.toFixed(2).replace(/0$/, "") + "×";
+  $("speedBtn").textContent = speed.toFixed(2).replace(/0$/, "").replace(/\.$/, "") + "×";
+  $("speedRange").value = speed;
+  setFill($("speedRange"));
+  try { localStorage.setItem("speed", speed); } catch (e) {}
+  document.querySelectorAll("#chips button").forEach(b => b.classList.toggle("on", parseFloat(b.dataset.v) === speed));
+  updateMediaPosition();
+}
+for (const v of SPEEDS) {
+  const b = document.createElement("button");
+  b.textContent = v + "×"; b.dataset.v = v;
+  b.onclick = () => setSpeed(v);
+  $("chips").appendChild(b);
+}
+$("slower").onclick = () => setSpeed(speed - 0.05);
+$("faster").onclick = () => setSpeed(speed + 0.05);
+$("speedRange").oninput = e => setSpeed(parseFloat(e.target.value));
+
+// беззвучний файл: тап по книзі «відмикає» <audio> для iOS, щоб відтворення могло початись після завантаження
+const SILENT = "data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAIA+AAACABAAZGF0YQAAAAA=";
+function showPlayer() {
+  $("library").style.display = "none";
+  $("player").style.display = "block";
+  window.scrollTo(0, 0);
+  updateMini();
+}
+function hidePlayer() {   // «назад»: звук грає далі, у бібліотеці з'являється міні-плеєр
+  closeSheets();
+  saveProgress(true);
+  $("player").style.display = "none";
+  $("library").style.display = "block";
+  renderLibrary();
+  updateMini();
+}
+function updateMini() {
+  const m = $("mini"), show = !!cur && $("player").style.display !== "block";
+  m.style.display = show ? "flex" : "none";
+  $("library").classList.toggle("hasmini", show);
+  if (!cur) return;
+  m.dataset.state = audio.paused ? "paused" : "playing";
+  if (m.dataset.book !== cur.id) { m.dataset.book = cur.id; paintArt($("miniArt"), cur); }
+  $("miniT").textContent = curCh >= 0 ? cur.chapters[curCh].title : cur.title;
+  $("miniS").textContent = cur.title + " · " + speed.toFixed(2).replace(/0$/, "").replace(/\.$/, "") + "×";
+}
+$("mini").onclick = e => { if (e.target.closest("#miniBtn")) return; showPlayer(); };
+$("miniBtn").onclick = () => togglePlay();
+
+async function openBook(id, autoplay) {
+  if (cur && cur.id === id) {   // книга вже відкрита: просто повертаємось до плеєра
+    showPlayer();
+    if (total && audio.currentTime >= total - 1) audio.currentTime = 0;   // книгу дослухано: починаємо спочатку
+    if (autoplay && audio.paused) audio.play().catch(e => log("play відхилено: " + (e && e.name)));
+    return;
+  }
+  if (autoplay && !audio.getAttribute("src")) { try { audio.src = SILENT; audio.play().catch(() => {}); } catch (e) {} }
+  const book = await getBook(id);
+  if (!book) return;
+  if (cur) leaveBook(true, false);
+  cur = book; ready = false; curCh = -1;
+  showPlayer();
+  $("pTitle").textContent = book.title;
+  $("pAuthor").textContent = book.author;
+  $("pAuthorSep").style.display = book.author ? "" : "none";
+  { const a = $("art"); a.textContent = ""; paintArt(a, book); }
+  $("pChapter").textContent = "Завантажую…";
+  $("textBtn").style.display = book.text ? "" : "none";
+  computeOffsets(book);
+  setSpeed(speed);
+  const blobs = await Promise.all(book.chapters.map(c => getBlob(`${book.id}/${c.file}`)));
+  if (cur !== book) return;
+  if (blobs.some(b => !b)) { alert("Файли книги не знайдено. Додайте книгу ще раз."); leaveBook(false); return; }
+  if (streamUrl) URL.revokeObjectURL(streamUrl);
+  streamUrl = URL.createObjectURL(new Blob(blobs, { type: "audio/mpeg" }));
+  const meta = once(audio, "loadedmetadata", "error");
+  audio.src = streamUrl;
+  audio.defaultPlaybackRate = speed; audio.playbackRate = speed;
+  await meta;
+  if (cur !== book) return;
+  if (audio.error) { alert("Не вдалося відкрити звук книги (код " + audio.error.code + ")"); log("помилка завантаження " + audio.error.code); leaveBook(false); return; }
+  rescale(audio.duration);
+  let t = bookDone(book);
+  if (t >= total - 1) t = 0;
+  audio.currentTime = Math.min(t, Math.max(0, total - 0.1));
+  ready = true;
+  book.opened = Date.now();
+  log(`відкрито «${book.title}», ${fmt(total)}, з ${fmt(t)}`);
+  updateChapterUI(true);
+  updateMediaPosition();
+  $("skipInfo").textContent = book.skipped && book.skipped.length ? "Під час озвучки пропущено: " + book.skipped.map(x => typeof x === "string" ? x : "«" + x.title + "» (" + x.why + ")").join("; ") + "." : "";
+  syncBlock = syncOn();
+  saveProgress(true);
+  await cloudPull(book);
+  if (cur !== book) return;
+  if (autoplay) audio.play().catch(e => log("play відхилено: " + (e && e.name)));
+}
+
+function renderChapters() {
+  const box = $("chapters");
+  box.innerHTML = "";
+  cur.chapters.forEach((c, i) => {
+    const el = document.createElement("div");
+    el.className = "chap" + (i === curCh ? " cur" : "");
+    el.innerHTML = "<span></span><span></span>";
+    el.children[0].textContent = c.title;
+    el.children[1].textContent = fmt(chapterEnd(i) - offs[i]);
+    el.onclick = () => seekTo(offs[i], true);
+    box.appendChild(el);
+  });
+}
+
+function updateChapterUI(force) {
+  if (!cur || !offs.length) return;
+  const T = audio.currentTime || 0;
+  const i = chapterAt(T);
+  if (i !== curCh || force) {
+    if (i !== curCh) log(`розділ ${i + 1}/${cur.chapters.length}`);
+    curCh = i;
+    $("pChapterTitle").textContent = cur.chapters[i].title;
+    $("pChapter").textContent = `${i + 1} з ${cur.chapters.length}`;
+    renderChapters();
+    updateMediaMeta();
+    updateMediaPosition();
+    updateMini();
+  }
+  const len = chapterEnd(i) - offs[i];
+  const t = Math.max(0, T - offs[i]);
+  if (!seeking) { $("seek").value = len ? Math.min(1000, t / len * 1000) : 0; setFill($("seek")); }
+  $("tNow").textContent = fmt(t);
+  $("tLeft").textContent = "-" + fmt((len - t) / speed);
+  $("bookLine").textContent = total ? `Усього ${fmt(T)} з ${fmt(total)} · лишилось ${fmt(Math.max(0, total - T) / speed)}` : "";
+  setPlayState(audio.paused);
+  if (textOpen()) { if (i !== textCh && textCh === prevCurCh) renderText(i); else syncText(false); }
+  prevCurCh = i;
+}
+let prevCurCh = -1;
+
+/* ---------- текст книги: читати разом зі звуком, тап по абзацу перемотує ---------- */
+let textCh = -1, textIdx = -1, textScrollAt = 0;
+const textOpen = () => $("sheetText").classList.contains("open");
+function textSize() { const v = parseInt(store.get("textSize"), 10); return v >= 14 && v <= 30 ? v : 18; }
+function chapterText(i) { return (cur && cur.text && cur.chapters[i] && cur.text[cur.chapters[i].file]) || []; }
+function renderText(ch) {
+  textCh = Math.max(0, Math.min(cur.chapters.length - 1, ch)); textIdx = -1;
+  $("textTitle").textContent = `${textCh + 1}/${cur.chapters.length} · ${cur.chapters[textCh].title}`;
+  const box = $("textList"); box.textContent = ""; box.style.fontSize = textSize() + "px";
+  chapterText(textCh).forEach(([t, txt], k) => {
+    const p = document.createElement("p"); p.textContent = txt;
+    p.onclick = () => seekTo(offs[textCh] + t);
+    box.appendChild(p);
+  });
+  if (!box.children.length) { const p = document.createElement("p"); p.textContent = "Для цього розділу тексту немає."; box.appendChild(p); }
+  box.scrollTop = 0;
+  syncText(true);
+}
+function syncText(jump) {   // підсвічує абзац, який зараз звучить, і підкручує до нього
+  if (!cur || !textOpen() || textCh < 0) return;
+  const list = chapterText(textCh), box = $("textList");
+  let idx = -1;
+  if (curCh === textCh) {
+    const rel = (audio.currentTime || 0) - offs[textCh];
+    for (let k = list.length - 1; k >= 0; k--) if (list[k][0] <= rel + 0.05) { idx = k; break; }
+  }
+  if (idx === textIdx && !jump) return;
+  textIdx = idx;
+  [...box.children].forEach((el, k) => el.classList.toggle("cur", k === idx));
+  const el = box.children[idx];
+  if (el && (jump || Date.now() - textScrollAt > 4000)) el.scrollIntoView({ block: "center", behavior: jump ? "auto" : "smooth" });
+}
+function openText() {
+  if (!cur || !cur.text) return;
+  openSheet("sheetText");
+  renderText(curCh < 0 ? 0 : curCh);
+}
+$("textBtn").onclick = openText;
+$("textPrev").onclick = () => renderText(textCh - 1);
+$("textNext").onclick = () => renderText(textCh + 1);
+$("textSmaller").onclick = () => { store.set("textSize", String(Math.max(14, textSize() - 2))); $("textList").style.fontSize = textSize() + "px"; syncText(true); };
+$("textBigger").onclick = () => { store.set("textSize", String(Math.min(30, textSize() + 2))); $("textList").style.fontSize = textSize() + "px"; syncText(true); };
+$("textList").addEventListener("scroll", () => { textScrollAt = Date.now(); }, { passive: true });
+
+function seekTo(T, play) {
+  if (!cur || !ready) return;
+  audio.currentTime = Math.max(0, Math.min(Math.max(0, total - 0.1), T));
+  if (play && audio.paused) audio.play().catch(() => {});
+  updateChapterUI();
+  updateMediaPosition();
+}
+const skip = s => seekTo((audio.currentTime || 0) + s);
+function prevChapter() {
+  const T = audio.currentTime || 0, i = chapterAt(T);
+  seekTo(T - offs[i] > 5 || i === 0 ? offs[i] : offs[i - 1]);
+}
+function nextChapter() { if (curCh + 1 < offs.length) seekTo(offs[curCh + 1]); }
+const togglePlay = () => audio.paused ? audio.play().catch(e => log("play відхилено: " + (e && e.name))) : audio.pause();
+$("playBtn").onclick = togglePlay;
+$("back15").onclick = () => skip(-15);
+$("fwd30").onclick = () => skip(30);
+$("prevCh").onclick = prevChapter;
+$("nextCh").onclick = nextChapter;
+
+$("seek").oninput = e => {
+  setFill(e.target);
+  seeking = true;
+  const len = chapterEnd(curCh) - offs[curCh];
+  $("tNow").textContent = fmt(e.target.value / 1000 * len);
+};
+$("seek").onchange = e => {
+  const len = chapterEnd(curCh) - offs[curCh];
+  seeking = false;
+  seekTo(offs[curCh] + e.target.value / 1000 * len);
+};
+
+async function saveProgress(force) {
+  if (!cur || !ready) return;
+  const now = Date.now();
+  if (!force && now - lastSave < 5000) return;
+  lastSave = now;
+  cur.pos = { t: audio.currentTime || 0 };
+  try { await putBook(cur); } catch (e) {}
+  cloudPush(force);
+}
+// синхронізація позиції: ключ «профіль + id книги» (id однаковий, якщо книгу додано з того самого файлу); найновіша позиція перемагає
+let syncBlock = false, syncLast = 0;
+const syncOn = () => !!store.get("voiceCode") && !!store.get("profile");
+function cloudPush(force) {
+  if (!cur || !ready || syncBlock || !syncOn()) return;
+  const now = Date.now();
+  if (!force && now - syncLast < 60000) return;
+  syncLast = now;
+  voiceCall("progress_set", { profile: store.get("profile"), book: cur.id, pos: Math.floor(audio.currentTime || 0), total: Math.floor(total) }).catch(() => {});
+}
+function agoText(iso) {
+  const m = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 60000));
+  if (!isFinite(m)) return "";
+  return m < 60 ? ` (${m} хв тому)` : m < 1440 ? ` (${Math.round(m / 60)} год тому)` : ` (${Math.round(m / 1440)} дн. тому)`;
+}
+async function cloudPull(book) {   // перед стартом питаємо, чи перейти на позицію з іншого телефона
+  if (!syncOn()) return;
+  syncBlock = true;
+  try {
+    const r = await Promise.race([voiceCall("progress_get", { profile: store.get("profile"), book: book.id }), new Promise(res => setTimeout(() => res(null), 2500))]);
+    const p = r && r.progress;
+    if (p && cur === book && p.pos > bookDone(book) + 30 && p.pos < total - 1 &&
+        confirm(`На іншому телефоні (профіль «${store.get("profile")}») ви дослухали до ${fmt(p.pos)}${agoText(p.updated)}. Перейти туди?`)) seekTo(p.pos);
+  } catch (e) { log("синхронізація: " + errText(e)); }
+  finally { syncBlock = false; }
+}
+
+audio.addEventListener("timeupdate", () => { updateChapterUI(); saveProgress(false); checkChapterSleep(); });
+audio.addEventListener("play", () => { log("play"); onPlayState(); });
+audio.addEventListener("pause", () => { log("pause"); onPlayState(); saveProgress(true); });
+audio.addEventListener("ended", () => { log("ended (кінець книги)"); onPlayState(); if (cur && ready) { cur.pos = { t: total }; saveProgress(true); } });
+audio.addEventListener("seeked", () => { saveProgress(true); updateChapterUI(); });
+audio.addEventListener("waiting", () => log("waiting"));
+audio.addEventListener("stalled", () => log("stalled"));
+audio.addEventListener("error", () => log("error " + (audio.error ? audio.error.code + " " + (audio.error.message || "") : "")));
+audio.addEventListener("loadedmetadata", () => { log(`loadedmetadata ${audio.duration.toFixed(1)}`); audio.playbackRate = speed; });
+function onPlayState() {
+  updateChapterUI();
+  updateMini();
+  if ("mediaSession" in navigator) navigator.mediaSession.playbackState = audio.paused ? "paused" : "playing";
+  updateMediaPosition();
+}
+
+function leaveBook(save = true, render = true) {
+  closeSheets();
+  audio.pause();
+  if (save) saveProgress(true);
+  clearSleep();
+  ready = false;
+  audio.removeAttribute("src"); audio.load();
+  if (streamUrl) { URL.revokeObjectURL(streamUrl); streamUrl = null; }
+  cur = null; curCh = -1;
+  $("player").style.display = "none";
+  $("library").style.display = "block";
+  updateMini();
+  if (render) renderLibrary();
+}
+$("backBtn").onclick = hidePlayer;
+
+// свайп вниз по плеєру = «назад» (як у музичних застосунках); не чіпає повзунки й відкриті вікна
+(() => {
+  const pl = $("player");
+  let sx = 0, sy = 0, dragging = false, active = false;
+  pl.addEventListener("touchstart", e => {
+    active = false; dragging = false;
+    if (e.touches.length !== 1 || document.querySelector(".sheet.open") || e.target.closest("input[type=range], button")) return;
+    if (window.scrollY > 0) return;
+    sx = e.touches[0].clientX; sy = e.touches[0].clientY; active = true;
+  }, { passive: true });
+  pl.addEventListener("touchmove", e => {
+    if (!active) return;
+    const dx = e.touches[0].clientX - sx, dy = e.touches[0].clientY - sy;
+    if (!dragging && dy > 12 && dy > Math.abs(dx) * 1.5) dragging = true;
+    if (dragging) { pl.style.transition = "none"; pl.style.transform = `translateY(${Math.max(0, dy) * 0.6}px)`; pl.style.opacity = String(Math.max(0.4, 1 - dy / 600)); }
+  }, { passive: true });
+  const finish = e => {
+    if (!active) return;
+    active = false;
+    const dy = (e.changedTouches && e.changedTouches[0] ? e.changedTouches[0].clientY : sy) - sy;
+    const was = dragging; dragging = false;
+    pl.style.transition = "transform .2s, opacity .2s"; pl.style.transform = ""; pl.style.opacity = "";
+    if (was && dy > 110) $("backBtn").click();
+  };
+  pl.addEventListener("touchend", finish);
+  pl.addEventListener("touchcancel", finish);
+})();
+$("coverBtn").onclick = () => $("coverInput").click();
+$("coverInput").onchange = async ev => {
+  const f = ev.target.files[0]; ev.target.value = "";
+  if (!f || !cur) return;
+  try {
+    const bmp = await createImageBitmap(f);
+    const k = Math.min(1, 700 / Math.max(bmp.width, bmp.height));
+    const cv = document.createElement("canvas");
+    cv.width = Math.round(bmp.width * k); cv.height = Math.round(bmp.height * k);
+    cv.getContext("2d").drawImage(bmp, 0, 0, cv.width, cv.height);
+    const blob = await new Promise(res => cv.toBlob(res, "image/jpeg", 0.85));
+    if (!blob) throw new Error("не вдалося обробити зображення");
+    cur.cover = blob;
+    if (coverUrls[cur.id]) { URL.revokeObjectURL(coverUrls[cur.id]); delete coverUrls[cur.id]; }
+    delete artUrls[cur.id]; delete artUrls[cur.id + "?"]; updateMediaMeta();
+    await putBook(cur);
+    paintArt($("art"), cur);
+    closeSheets(); toast("Обкладинку збережено");
+  } catch (e) { log("обкладинка: " + errText(e)); toast("Не вдалося: " + errText(e)); }
+};
+$("delBtn").onclick = async () => {
+  if (!cur || !confirm(`Видалити «${cur.title}» з телефону? Файл в iCloud лишиться.`)) return;
+  const book = cur;
+  leaveBook(false, false);
+  for (const c of book.chapters) await delBlob(`${book.id}/${c.file}`);
+  await delBook(book.id);
+  renderLibrary();
+};
+
+/* ---------- екран блокування (Media Session) ---------- */
+const artUrls = {};   // картинка для екрана блокування: обкладинка книги або намальований градієнт з назвою
+function ensureArt(book) {
+  if (artUrls[book.id] || artUrls[book.id + "?"]) return;
+  artUrls[book.id + "?"] = true;
+  const done = u => { artUrls[book.id] = u; if (cur && cur.id === book.id) updateMediaMeta(); };
+  if (book.cover) { done(URL.createObjectURL(book.cover)); return; }
+  try {
+    const cv = document.createElement("canvas"); cv.width = cv.height = 512;
+    const g = cv.getContext("2d"), c = coverColors(book.title);
+    const grad = g.createLinearGradient(0, 0, 512, 512);
+    grad.addColorStop(0, c[0]); grad.addColorStop(0.55, c[1]); grad.addColorStop(1, c[2]);
+    g.fillStyle = grad; g.fillRect(0, 0, 512, 512);
+    g.fillStyle = "#fff7ee"; g.font = "800 56px -apple-system, system-ui, sans-serif"; g.textBaseline = "alphabetic";
+    const lines = []; let line = "";
+    for (const w of (book.title || "").toUpperCase().split(/\s+/).filter(Boolean)) {
+      if (line && g.measureText(line + " " + w).width > 440) { lines.push(line); line = w; } else line = line ? line + " " + w : w;
+    }
+    if (line) lines.push(line);
+    const shown = lines.slice(0, 4);
+    shown.forEach((t, i) => g.fillText(t, 36, 512 - 36 - (shown.length - 1 - i) * 62));
+    cv.toBlob(b => { if (b) done(URL.createObjectURL(b)); }, "image/png");
+  } catch (e) { log("картинка для екрана блокування: " + errText(e)); }
+}
+function updateMediaMeta() {
+  if (!("mediaSession" in navigator) || !cur || curCh < 0) return;
+  ensureArt(cur);
+  const src = artUrls[cur.id];
+  navigator.mediaSession.metadata = new MediaMetadata({
+    title: cur.chapters[curCh].title, artist: cur.author || "Читалка", album: cur.title,
+    artwork: src ? [{ src, sizes: "512x512" }] : [{ src: "icon-512.png", sizes: "512x512", type: "image/png" }],
+  });
+}
+function updateMediaPosition() {
+  if (!("mediaSession" in navigator) || !navigator.mediaSession.setPositionState || !cur || curCh < 0 || !total) return;
+  const len = chapterEnd(curCh) - offs[curCh];
+  if (!(len > 0)) return;
+  const pos = Math.min(len, Math.max(0, (audio.currentTime || 0) - offs[curCh]));
+  try { navigator.mediaSession.setPositionState({ duration: len, playbackRate: speed, position: pos }); } catch (e) {}
+}
+if ("mediaSession" in navigator) {
+  const ms = navigator.mediaSession;
+  const set = (a, f) => { try { ms.setActionHandler(a, f); } catch (e) {} };
+  set("play", () => audio.play());
+  set("pause", () => audio.pause());
+  set("seekbackward", d => skip(-(d && d.seekOffset || 15)));
+  set("seekforward", d => skip(d && d.seekOffset || 30));
+  set("previoustrack", prevChapter);
+  set("nexttrack", nextChapter);
+  set("seekto", d => seekTo(offs[curCh] + d.seekTime));
+}
+
+/* ---------- таймер сну ---------- */
+function clearSleep() {
+  clearInterval(sleepTimer); sleepTimer = null; sleepEndAt = 0; sleepUntil = 0;
+  clearTimeout(sleepTimeout); sleepTimeout = null;
+  $("sleepStatus").textContent = ""; $("sleepLbl").textContent = "";
+  try { audio.volume = 1; } catch (e) {}
+}
+function checkChapterSleep() {   // «до кінця розділу»: точна зупинка на межі
+  if (!sleepUntil || sleepTimeout) return;
+  const T = audio.currentTime || 0;
+  if (T > sleepUntil + 0.5) { clearSleep(); return; }
+  const remain = (sleepUntil - T) / speed;
+  if (remain <= 0.7) sleepTimeout = setTimeout(sleepFire, Math.max(0, remain * 1000 - 30));
+}
+function sleepFire() {
+  const end = sleepUntil;
+  if (!end) return;
+  audio.pause();
+  try { audio.currentTime = Math.min(end, Math.max(0, total - 0.1)); } catch (e) {}
+  log("таймер сну: зупинено на межі розділу");
+  clearSleep();
+  updateChapterUI();
+}
+function startSleep(min) {      // min: число хвилин або "chapter"
+  clearSleep();
+  if (min === "chapter") {
+    if (!cur || curCh < 0) return;
+    sleepUntil = chapterEnd(curCh);
+    $("sleepStatus").textContent = "Зупиниться наприкінці розділу"; $("sleepLbl").textContent = "до кінця";
+    checkChapterSleep();
+    return;
+  }
+  if (!(min > 0)) return;
+  sleepEndAt = Date.now() + min * 60000;
+  const tick = () => {
+    const left = sleepEndAt - Date.now();
+    if (left <= 0) { audio.pause(); log("таймер сну: зупинено за часом"); clearSleep(); return; }
+    // останні 20 с плавно тихішає (на iOS гучність програмно може не змінюватись, тоді просто зупиниться)
+    if (left < 20000) { try { audio.volume = Math.max(0.05, left / 20000); } catch (e) {} }
+    $("sleepStatus").textContent = "Зупиниться через " + fmt(left / 1000);
+    $("sleepLbl").textContent = Math.ceil(left / 60000) + " хв";
+  };
+  tick(); sleepTimer = setInterval(tick, 1000);
+}
+$("sleepBtn").onclick = () => {
+  const on = !!(sleepEndAt || sleepUntil);
+  $("sleepOff").style.display = on ? "inline-block" : "none";
+  openSheet("sheetSleep");
+};
+$("sleepChips").onclick = e => {
+  const m = e.target.closest("button"); if (!m) return;
+  closeSheets();
+  startSleep(m.dataset.min === "chapter" ? "chapter" : parseFloat(m.dataset.min));
+};
+$("sleepOff").onclick = () => { clearSleep(); closeSheets(); toast("Таймер вимкнено"); };
+
+
+/* ---------- оформлення: заливка повзунків, стан кнопки, вікна, тема ---------- */
+function setFill(el) {
+  const min = parseFloat(el.min), max = parseFloat(el.max);
+  el.style.setProperty("--p", ((el.value - min) / (max - min) * 100) + "%");
+}
+function setPlayState(paused) {
+  const b = $("playBtn");
+  b.dataset.state = paused ? "paused" : "playing";
+  b.setAttribute("aria-label", paused ? "Грати" : "Пауза");
+}
+function openSheet(id) { closeSheets(); $(id).classList.add("open"); }
+function closeSheets() { document.querySelectorAll(".sheet.open").forEach(s => s.classList.remove("open")); }
+document.querySelectorAll(".sheet .bg").forEach(bg => bg.onclick = closeSheets);
+document.addEventListener("keydown", e => { if (e.key === "Escape") closeSheets(); });
+$("speedBtn").onclick = () => openSheet("sheetSpeed");
+$("chapBtn").onclick = () => { openSheet("sheetChap"); const c = document.querySelector("#chapters .cur"); if (c) c.scrollIntoView({ block: "center" }); };
+$("moreBtn").onclick = () => openSheet("sheetMore");
+
+let toastTimer = null;
+function toast(text) {
+  const t = $("toast");
+  t.textContent = text; t.classList.add("show");
+  clearTimeout(toastTimer); toastTimer = setTimeout(() => t.classList.remove("show"), 1600);
+}
+const THEMES = ["auto", "light", "dark"], THEME_NAMES = { auto: "Тема: як на телефоні", light: "Тема: світла", dark: "Тема: темна" };
+function applyTheme(mode) {
+  const root = document.documentElement;
+  if (mode === "light" || mode === "dark") root.dataset.theme = mode; else delete root.dataset.theme;
+  try { document.querySelector('meta[name="theme-color"]').content = getComputedStyle(document.body).backgroundColor; } catch (e) {}
+}
+let themeMode = "auto";
+try { themeMode = THEMES.includes(localStorage.getItem("theme")) ? localStorage.getItem("theme") : "auto"; } catch (e) {}
+applyTheme(themeMode);
+$("themeBtn").onclick = () => {
+  themeMode = THEMES[(THEMES.indexOf(themeMode) + 1) % THEMES.length];
+  try { localStorage.setItem("theme", themeMode); } catch (e) {}
+  applyTheme(themeMode); toast(THEME_NAMES[themeMode]); log("тема: " + themeMode);
+};
+
+/* ---------- запуск ---------- */
+document.addEventListener("visibilitychange", () => { log(document.hidden ? "екран/вкладка сховані" : "екран/вкладка видимі"); if (document.hidden) saveProgress(true); else checkCloudBooks(false); });
+window.addEventListener("pagehide", () => { log("pagehide"); saveProgress(true); });
+window.addEventListener("pageshow", () => log("pageshow"));
+if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(() => {});
+$("ver").textContent = "Читалка v" + VERSION;
+$("ver2").textContent = "Читалка v" + VERSION + " · журнал";
+log("старт v" + VERSION);
+renderLibrary().then(() => checkCloudBooks(true));
+</script>
+</body>
+</html>
