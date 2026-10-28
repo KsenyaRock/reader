@@ -1,0 +1,167 @@
+name: voice
+# Хмарна озвучка: EPUB за посиланням -> озвучка Edge TTS -> книга в Cloudflare R2 -> повідомлення в Telegram.
+# Голос Apple (gender=apple): запис голосу на macOS (apple-synth, хвилини x10, тому лише say), збірка книги на Linux (apple-pack).
+# Запуск вручну: Actions -> voice -> Run workflow. Секрети (Settings -> Secrets and variables -> Actions): R2_ENDPOINT, R2_BUCKET,
+# R2_KEY_ID, R2_SECRET, R2_PUBLIC_BASE, SUPABASE_URL, SUPABASE_ANON_KEY, READER_UPLOAD_KEY.
+on:
+  push:
+    branches: [dev]
+    paths: ['.github/workflows/voice.yml']   # лише щоб GitHub зареєстрував workflow; сама озвучка запускається вручну
+  workflow_dispatch:
+    inputs:
+      epub_url:
+        description: 'Посилання на .epub (https://...)'
+        required: true
+      gender:
+        description: 'Голос'
+        type: choice
+        options: [female, male, apple]
+        default: female
+      jobs:
+        description: 'Паралельних запитів'
+        default: '12'
+      job_id:
+        description: 'Номер задачі з читалки (порожньо, якщо запуск вручну)'
+        required: false
+        default: ''
+concurrency:
+  group: voice
+  cancel-in-progress: false
+jobs:
+  voice:
+    if: github.event_name == 'workflow_dispatch' && inputs.gender != 'apple'
+    runs-on: ubuntu-latest
+    timeout-minutes: 340
+    steps:
+      - name: Сховати посилання на EPUB у журналі (репозиторій публічний)
+        env:
+          EPUB_URL: ${{ inputs.epub_url }}
+        run: |
+          echo "::add-mask::$EPUB_URL"
+          for t in $(echo "$EPUB_URL" | grep -oE '[a-f0-9]{32}'); do echo "::add-mask::$t"; done
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.12' }
+      - run: pip install edge-tts mutagen
+      - name: Озвучка і завантаження
+        env:
+          EPUB_URL: ${{ inputs.epub_url }}
+          GENDER: ${{ inputs.gender }}
+          JOBS: ${{ inputs.jobs }}
+          JOB_ID: ${{ inputs.job_id }}
+          R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
+          R2_BUCKET: ${{ secrets.R2_BUCKET }}
+          R2_KEY_ID: ${{ secrets.R2_KEY_ID }}
+          R2_SECRET: ${{ secrets.R2_SECRET }}
+          R2_PUBLIC_BASE: ${{ secrets.R2_PUBLIC_BASE }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+          READER_UPLOAD_KEY: ${{ secrets.READER_UPLOAD_KEY }}
+        run: python3 tool/cloud_job.py
+      - name: Позначити задачу як невдалу (збій, скасування або перевищення часу)
+        if: ${{ (failure() || cancelled()) && inputs.job_id != '' }}
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+          READER_UPLOAD_KEY: ${{ secrets.READER_UPLOAD_KEY }}
+          JOB_ID: ${{ inputs.job_id }}
+        run: |
+          curl -sS -m 30 -X POST "$SUPABASE_URL/rest/v1/rpc/reader_job_update" \
+            -H "Content-Type: application/json" -H "apikey: $SUPABASE_ANON_KEY" -H "Authorization: Bearer $SUPABASE_ANON_KEY" \
+            -d "{\"k\":\"$READER_UPLOAD_KEY\",\"p_job\":$JOB_ID,\"p_status\":\"failed\",\"p_err\":\"Озвучка перервалась (див. журнал запуску на GitHub)\"}" || true
+
+  apple-synth:
+    if: github.event_name == 'workflow_dispatch' && inputs.gender == 'apple'
+    runs-on: macos-latest
+    timeout-minutes: 120
+    steps:
+      - name: Сховати посилання на EPUB у журналі (репозиторій публічний)
+        env:
+          EPUB_URL: ${{ inputs.epub_url }}
+        run: |
+          echo "::add-mask::$EPUB_URL"
+          for t in $(echo "$EPUB_URL" | grep -oE '[a-f0-9]{32}'); do echo "::add-mask::$t"; done
+      - uses: actions/checkout@v4
+      - name: Запис голосом Apple (Леся, Мілена, Samantha)
+        env:
+          EPUB_URL: ${{ inputs.epub_url }}
+          GENDER: apple
+          STAGE: apple-synth
+          APPLE_DIR: apple-parts
+          APPLE_JOBS: '3'
+          JOB_ID: ${{ inputs.job_id }}
+          R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
+          R2_BUCKET: ${{ secrets.R2_BUCKET }}
+          R2_KEY_ID: ${{ secrets.R2_KEY_ID }}
+          R2_SECRET: ${{ secrets.R2_SECRET }}
+          R2_PUBLIC_BASE: ${{ secrets.R2_PUBLIC_BASE }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+          READER_UPLOAD_KEY: ${{ secrets.READER_UPLOAD_KEY }}
+        run: python3 tool/cloud_job.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: apple-parts
+          path: apple-parts/
+          retention-days: 1
+          compression-level: 0
+          if-no-files-found: error
+
+  apple-pack:
+    needs: apple-synth
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Сховати посилання на EPUB у журналі (репозиторій публічний)
+        env:
+          EPUB_URL: ${{ inputs.epub_url }}
+        run: |
+          echo "::add-mask::$EPUB_URL"
+          for t in $(echo "$EPUB_URL" | grep -oE '[a-f0-9]{32}'); do echo "::add-mask::$t"; done
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.12' }
+      - run: pip install mutagen imageio-ffmpeg
+      - uses: actions/download-artifact@v4
+        with:
+          name: apple-parts
+          path: apple-parts
+      - name: Збірка книги і завантаження
+        env:
+          EPUB_URL: ${{ inputs.epub_url }}
+          GENDER: apple
+          STAGE: apple-pack
+          APPLE_DIR: apple-parts
+          JOB_ID: ${{ inputs.job_id }}
+          R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
+          R2_BUCKET: ${{ secrets.R2_BUCKET }}
+          R2_KEY_ID: ${{ secrets.R2_KEY_ID }}
+          R2_SECRET: ${{ secrets.R2_SECRET }}
+          R2_PUBLIC_BASE: ${{ secrets.R2_PUBLIC_BASE }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+          READER_UPLOAD_KEY: ${{ secrets.READER_UPLOAD_KEY }}
+        run: python3 tool/cloud_job.py
+
+  apple-failed:
+    needs: [apple-synth, apple-pack]
+    if: ${{ always() && inputs.gender == 'apple' && inputs.job_id != '' && (contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled')) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Сховати посилання на EPUB у журналі (репозиторій публічний)
+        env:
+          EPUB_URL: ${{ inputs.epub_url }}
+        run: |
+          echo "::add-mask::$EPUB_URL"
+          for t in $(echo "$EPUB_URL" | grep -oE '[a-f0-9]{32}'); do echo "::add-mask::$t"; done
+      - name: Позначити задачу як невдалу (збій, скасування або перевищення часу)
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+          READER_UPLOAD_KEY: ${{ secrets.READER_UPLOAD_KEY }}
+          JOB_ID: ${{ inputs.job_id }}
+        run: |
+          curl -sS -m 30 -X POST "$SUPABASE_URL/rest/v1/rpc/reader_job_update" \
+            -H "Content-Type: application/json" -H "apikey: $SUPABASE_ANON_KEY" -H "Authorization: Bearer $SUPABASE_ANON_KEY" \
+            -d "{\"k\":\"$READER_UPLOAD_KEY\",\"p_job\":$JOB_ID,\"p_status\":\"failed\",\"p_err\":\"Озвучка голосом Apple перервалась (див. журнал запуску на GitHub)\"}" || true
