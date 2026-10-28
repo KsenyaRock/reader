@@ -39,7 +39,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: sudo apt-get install -y postgresql-client >/dev/null
-      - run: PSQL="psql postgresql://postgres:pg@localhost:5432/rt" tests/sql/run.sh
+      - run: PSQL="psql postgresql://postgres:pg@localhost:5432/rt" bash tests/sql/run.sh
 
   client:
     name: Плеєр у браузері (Playwright)
@@ -58,4 +58,4 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
-      - run: tests/edge/run.sh
+      - run: bash tests/edge/run.sh
