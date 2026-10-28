@@ -1,0 +1,24 @@
+name: monitor-deploy
+
+# Після кожного push у main (production-деплой Netlify, 15 кредитів) повідомляє лічильник кредитів у Supabase.
+# Секрет репозиторію SUPABASE_ANON_KEY (публічний anon-ключ) вносить власник репозиторію: Settings -> Secrets and variables -> Actions.
+on:
+  push:
+    branches: [main]
+
+jobs:
+  count:
+    name: Лічильник кредитів Netlify
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Повідомити Supabase про деплой
+        continue-on-error: true
+        env:
+          KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+        run: |
+          if [ -z "$KEY" ]; then echo "Секрет SUPABASE_ANON_KEY не задано, пропускаю"; exit 0; fi
+          curl -sS --max-time 20 -X POST "https://hikzqzdulvekuplolymw.supabase.co/rest/v1/rpc/mon_deploy" \
+            -H "apikey: $KEY" -H "Authorization: Bearer $KEY" -H "Content-Type: application/json" \
+            -d "{\"p_repo\":\"${GITHUB_REPOSITORY##*/}\",\"p_sha\":\"$GITHUB_SHA\"}"
+          echo
