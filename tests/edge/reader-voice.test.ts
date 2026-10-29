@@ -8,8 +8,10 @@ const ENV = {
 };
 
 type Call = { url: string; method: string; headers: Record<string, string>; body?: any };
-function fake(opts: { code?: string; busy?: boolean; locked?: boolean; ghStatus?: number; epubLen?: number | null; link?: string | null; delStatus?: number; cancelOk?: boolean; runs?: number[]; badAudience?: boolean } = {}) {
+function fake(opts: { code?: string; full?: boolean; claimNull?: boolean; cancelState?: string; preload?: any[]; missing?: string[]; locked?: boolean; ghStatus?: number; epubLen?: number | null; link?: string | null; delStatus?: number; cancelOk?: boolean; runs?: number[]; badAudience?: boolean } = {}) {
   const calls: Call[] = [];
+  const queue: any[] = [...(opts.preload ?? [])];   // книги, що чекають у черзі (імітація бази)
+  let nextId = 42;
   const f = (async (url: any, init: any = {}) => {
     const u = String(url);
     const body = init.body ? JSON.parse(init.body) : undefined;
@@ -19,18 +21,25 @@ function fake(opts: { code?: string; busy?: boolean; locked?: boolean; ghStatus?
       if (opts.locked) return resp(400, { code: "54000", message: "too many attempts" });
       return resp(200, body.p_code === (opts.code ?? "good-code"));
     }
-    if (u.endsWith("/rpc/reader_job_create")) return opts.badAudience ? resp(400, { code: "22023", message: "bad audience" }) : opts.busy ? resp(400, { code: "55006", message: "busy" }) : resp(200, 42);
+    if (u.endsWith("/rpc/reader_job_enqueue")) {
+      if (opts.badAudience) return resp(400, { code: "22023", message: "bad audience" });
+      if (opts.full) return resp(400, { code: "55007", message: "queue full" });
+      const id = nextId++;
+      queue.push({ id, gender: body.p_gender, epub_url: body.p_url });
+      return resp(200, id);
+    }
+    if (u.endsWith("/rpc/reader_queue_claim")) return resp(200, opts.claimNull ? null : (queue.shift() ?? null));
     if (u.endsWith("/rpc/reader_job_fail")) return resp(200, null);
     if (u.endsWith("/rpc/reader_voice_list")) return resp(200, { jobs: [], books: [{ id: 1, title: "Чорти", link: "https://x" }] });
     if (u.endsWith("/rpc/reader_book_link")) return resp(200, opts.link === undefined ? "https://pub-x.r2.dev/tok/Book%20One.audiobook.zip" : opts.link);
     if (u.endsWith("/rpc/reader_book_delete")) return resp(200, true);
-    if (u.endsWith("/rpc/reader_job_cancel")) return resp(200, opts.cancelOk ?? true);
+    if (u.endsWith("/rpc/reader_job_cancel2")) return resp(200, opts.cancelOk === false ? null : (opts.cancelState ?? "active"));
     if (u.endsWith("/rpc/reader_progress_set")) return resp(200, null);
     if (u.endsWith("/rpc/reader_progress_get")) return resp(200, body.p_book === "known000001" ? { pos: 900, total: 40000, updated: "2026-10-28T10:00:00Z" } : null);
     if (u.includes("/actions/workflows/voice.yml/runs?")) return resp(200, { workflow_runs: u.includes("status=in_progress") ? (opts.runs ?? [555]).map(id => ({ id })) : [] });
     if (u.includes("/actions/runs/") && u.endsWith("/cancel")) return new Response(null, { status: 202 });
     if (u.startsWith("https://acc.r2.cloudflarestorage.com/")) return new Response(null, { status: opts.delStatus ?? 204 });
-    if (u.startsWith("https://pub-x.r2.dev/")) return opts.epubLen === null ? resp(404, undefined) : resp(200, undefined, { "content-length": String(opts.epubLen ?? 5000000) });
+    if (u.startsWith("https://pub-x.r2.dev/")) return opts.epubLen === null || (opts.missing ?? []).includes(u) ? resp(404, undefined) : resp(200, undefined, { "content-length": String(opts.epubLen ?? 5000000) });
     if (u.startsWith("https://api.github.com/")) return new Response(null, { status: opts.ghStatus ?? 204 });
     throw new Error("несподіваний запит " + u);
   }) as unknown as typeof fetch;
@@ -80,8 +89,10 @@ test("run: створює задачу й запускає workflow з прав�
   const { f, calls } = fake();
   const r = await handle(post({ action: "run", code: "good-code", key: KEY, title: "Чорти.epub", gender: "male" }), ENV, f);
   expect(r.status).toBe(200);
-  expect((await r.json()).job).toBe(42);
-  const create = calls.find(c => c.url.endsWith("reader_job_create"))!;
+  const rj = await r.json();
+  expect(rj.job).toBe(42);
+  expect(rj.queued).toBe(false);
+  const create = calls.find(c => c.url.endsWith("reader_job_enqueue"))!;
   expect(create.body).toEqual({ p_title: "Чорти", p_gender: "male", p_url: "https://pub-x.r2.dev/" + KEY, p_for: "both" });
   const gh = calls.find(c => c.url.includes("api.github.com"))!;
   expect(gh.url).toBe("https://api.github.com/repos/abohdanovskyi/reader-app/actions/workflows/voice.yml/dispatches");
@@ -104,14 +115,14 @@ test("list: «хто питає» передається в базу, некор
 test("run: «для кого» передається в базу; без вибору книга спільна; сміття відхиляється; невідомий ключ це 400", async () => {
   let x = fake();
   expect((await handle(post({ action: "run", code: "good-code", key: KEY, for: "ksenia" }), ENV, x.f)).status).toBe(200);
-  expect(x.calls.find(c => c.url.endsWith("reader_job_create"))!.body.p_for).toBe("ksenia");
+  expect(x.calls.find(c => c.url.endsWith("reader_job_enqueue"))!.body.p_for).toBe("ksenia");
   x = fake();
   await handle(post({ action: "run", code: "good-code", key: KEY }), ENV, x.f);
-  expect(x.calls.find(c => c.url.endsWith("reader_job_create"))!.body.p_for).toBe("both");
+  expect(x.calls.find(c => c.url.endsWith("reader_job_enqueue"))!.body.p_for).toBe("both");
   x = fake();
   const bad = await handle(post({ action: "run", code: "good-code", key: KEY, for: "A B;" }), ENV, x.f);
   expect(bad.status).toBe(400);
-  expect(x.calls.some(c => c.url.endsWith("reader_job_create"))).toBe(false);
+  expect(x.calls.some(c => c.url.endsWith("reader_job_enqueue"))).toBe(false);
   x = fake({ badAudience: true });
   const unknown = await handle(post({ action: "run", code: "good-code", key: KEY, for: "nobody" }), ENV, x.f);
   expect(unknown.status).toBe(400);
@@ -121,21 +132,23 @@ test("run: «для кого» передається в базу; без виб
 test("run: голос Apple передається далі, невідомий голос стає жіночим", async () => {
   let x = fake();
   await handle(post({ action: "run", code: "good-code", key: KEY, gender: "apple" }), ENV, x.f);
-  expect(x.calls.find(c => c.url.endsWith("reader_job_create"))!.body.p_gender).toBe("apple");
+  expect(x.calls.find(c => c.url.endsWith("reader_job_enqueue"))!.body.p_gender).toBe("apple");
   expect(x.calls.find(c => c.url.includes("api.github.com"))!.body.inputs.gender).toBe("apple");
   x = fake();
   await handle(post({ action: "run", code: "good-code", key: KEY, gender: "robot" }), ENV, x.f);
   expect(x.calls.find(c => c.url.includes("api.github.com"))!.body.inputs.gender).toBe("female");
 });
 
-test("run: чужий ключ файлу, відсутній файл, зайнято, відмова GitHub", async () => {
+test("run: чужий ключ файлу, відсутній файл, черга заповнена, відмова GitHub", async () => {
   let { f } = fake();
   expect((await handle(post({ action: "run", code: "good-code", key: "../x" }), ENV, f)).status).toBe(400);
   expect((await handle(post({ action: "run", code: "good-code", key: "in/" + "a".repeat(32) + "/book.epub/../../x" }), ENV, f)).status).toBe(400);
   ({ f } = fake({ epubLen: null }));
   expect((await handle(post({ action: "run", code: "good-code", key: KEY }), ENV, f)).status).toBe(400);
-  ({ f } = fake({ busy: true }));
-  expect((await handle(post({ action: "run", code: "good-code", key: KEY }), ENV, f)).status).toBe(409);
+  ({ f } = fake({ full: true }));
+  const full = await handle(post({ action: "run", code: "good-code", key: KEY }), ENV, f);
+  expect(full.status).toBe(409);
+  expect((await full.json()).error).toContain("Черга заповнена");
   const x = fake({ ghStatus: 401 });
   const r = await handle(post({ action: "run", code: "good-code", key: KEY }), ENV, x.f);
   expect(r.status).toBe(502);
@@ -192,7 +205,7 @@ test("cancel: спершу позначає задачу в базі, потім
   const r = await handle(post({ action: "cancel", code: "good-code", id: 42 }), ENV, f);
   expect(r.status).toBe(200);
   expect((await r.json()).stopped).toBe(1);
-  const iDb = calls.findIndex(c => c.url.endsWith("reader_job_cancel"));
+  const iDb = calls.findIndex(c => c.url.endsWith("reader_job_cancel2"));
   const iGh = calls.findIndex(c => c.url.endsWith("/actions/runs/555/cancel"));
   expect(iDb).toBeGreaterThan(-1);
   expect(iGh).toBeGreaterThan(iDb);
@@ -253,4 +266,86 @@ test("cancel: з окремим Apple-репозиторієм шукає зап
   expect(r.status).toBe(200);
   expect(x.calls.some(c => c.url.includes("/repos/o/apple-repo/actions/workflows/voice.yml/runs"))).toBe(true);
   expect(x.calls.some(c => c.url.includes("/repos/abohdanovskyi/reader-app/actions/workflows/voice.yml/runs"))).toBe(true);
+});
+
+// ---------- черга (скрипт 21) ----------
+const PRE = (id: number, gender = "female") => ({ id, gender, epub_url: "https://pub-x.r2.dev/in/" + String(id).repeat(32).slice(0, 32) + "/book.epub" });
+
+test("run: якщо вже йде озвучка, книга стає в чергу й нічого не запускається в GitHub", async () => {
+  const x = fake({ claimNull: true });
+  const r = await handle(post({ action: "run", code: "good-code", key: KEY, title: "Друга.epub" }), ENV, x.f);
+  expect(r.status).toBe(200);
+  const j = await r.json();
+  expect(j.queued).toBe(true);
+  expect(j.job).toBe(42);
+  expect(x.calls.some(c => c.url.includes("api.github.com"))).toBe(false);
+  expect(x.calls.some(c => c.url.endsWith("reader_job_fail"))).toBe(false);
+});
+
+test("run: черга не порожня й нічого не йде, запускається найстаріша, а нова лишається в черзі", async () => {
+  const x = fake({ preload: [PRE(7, "apple")] });
+  const j = await (await handle(post({ action: "run", code: "good-code", key: KEY }), ENV, x.f)).json();
+  expect(j.queued).toBe(true);      // 42 стала в чергу, а запущено 7
+  const gh = x.calls.filter(c => c.url.includes("api.github.com"));
+  expect(gh.length).toBe(1);
+  expect(gh[0].body.inputs.job_id).toBe("7");
+  expect(gh[0].body.inputs.gender).toBe("apple");
+});
+
+test("tick: запускає наступну книгу з черги", async () => {
+  const x = fake({ preload: [PRE(7, "male"), PRE(8)] });
+  const r = await handle(post({ action: "tick", code: "good-code" }), ENV, x.f);
+  expect(r.status).toBe(200);
+  expect((await r.json()).started).toEqual([{ id: 7, ok: true }]);   // лише одна за раз
+  const gh = x.calls.filter(c => c.url.includes("api.github.com"));
+  expect(gh.length).toBe(1);
+  expect(gh[0].body.inputs).toEqual({ epub_url: PRE(7).epub_url, gender: "male", jobs: "12", job_id: "7" });
+});
+
+test("tick: порожня черга або вже йде озвучка: нічого не робить", async () => {
+  let x = fake();
+  expect((await (await handle(post({ action: "tick", code: "good-code" }), ENV, x.f)).json()).started).toEqual([]);
+  expect(x.calls.some(c => c.url.includes("api.github.com"))).toBe(false);
+  x = fake({ preload: [PRE(7)], claimNull: true });
+  expect((await (await handle(post({ action: "tick", code: "good-code" }), ENV, x.f)).json()).started).toEqual([]);
+  expect(x.calls.some(c => c.url.includes("api.github.com"))).toBe(false);
+});
+
+test("tick: EPUB зник зі сховища, книга позначається помилкою, береться наступна", async () => {
+  const x = fake({ preload: [PRE(7), PRE(8)], missing: [PRE(7).epub_url] });
+  const r = await (await handle(post({ action: "tick", code: "good-code" }), ENV, x.f)).json();
+  expect(r.started).toEqual([{ id: 7, ok: false }, { id: 8, ok: true }]);
+  const fail = x.calls.find(c => c.url.endsWith("reader_job_fail"))!;
+  expect(fail.body.p_id).toBe(7);
+  expect(fail.body.p_err).toContain("недоступний");
+  const gh = x.calls.filter(c => c.url.includes("api.github.com"));
+  expect(gh.length).toBe(1);
+  expect(gh[0].body.inputs.job_id).toBe("8");
+});
+
+test("tick: GitHub відмовив, книги позначаються помилкою по одній, цикл скінченний", async () => {
+  const x = fake({ preload: [PRE(7), PRE(8), PRE(9)], ghStatus: 422 });
+  const r = await (await handle(post({ action: "tick", code: "good-code" }), ENV, x.f)).json();
+  expect(r.started).toEqual([{ id: 7, ok: false }, { id: 8, ok: false }, { id: 9, ok: false }]);
+  const fails = x.calls.filter(c => c.url.endsWith("reader_job_fail"));
+  expect(fails.map(c => c.body.p_id)).toEqual([7, 8, 9]);
+  expect(fails[0].body.p_err).toContain("422");
+});
+
+test("tick: неправильний код, немає токена GitHub", async () => {
+  const x = fake({ preload: [PRE(7)] });
+  expect((await handle(post({ action: "tick", code: "bad" }), ENV, x.f)).status).toBe(401);
+  expect(x.calls.some(c => c.url.endsWith("reader_queue_claim"))).toBe(false);
+  const { GITHUB_PAT: _skip, ...noPat } = ENV;
+  expect((await handle(post({ action: "tick", code: "good-code" }), noPat, fake().f)).status).toBe(500);
+});
+
+test("cancel: книга, що чекала в черзі, скасовується без жодного запиту в GitHub", async () => {
+  const x = fake({ cancelState: "waiting" });
+  const r = await handle(post({ action: "cancel", code: "good-code", id: 43 }), ENV, x.f);
+  expect(r.status).toBe(200);
+  const j = await r.json();
+  expect(j.waiting).toBe(true);
+  expect(j.stopped).toBe(0);
+  expect(x.calls.some(c => c.url.includes("api.github.com"))).toBe(false);
 });

@@ -1,5 +1,6 @@
 // Edge Function «reader-voice»: запуск хмарної озвучки з читалки. Вимкнути «Verify JWT» (доступ за кодом запуску).
-// Дії (POST JSON {action, code, ...}): check, presign, run, list, delete, cancel, progress_get, progress_set.
+// Дії (POST JSON {action, code, ...}): check, presign, run, tick, list, delete, cancel, progress_get, progress_set.
+// Черга (SQL-скрипт 21): run ставить книгу в чергу (до 5 книг чекають), запускається одна за раз; tick (його викликає база) запускає наступну.
 // Секрети функції (Dashboard -> Edge Functions -> Secrets): R2_ENDPOINT, R2_BUCKET, R2_KEY_ID, R2_SECRET, R2_PUBLIC_BASE, GITHUB_PAT,
 // необов'язково GITHUB_REPO (abohdanovskyi/reader-app) і GITHUB_REF (dev);
 // для Apple-голосів в іншому репозиторії: GITHUB_REPO_APPLE, GITHUB_PAT_APPLE (інакше GITHUB_PAT), GITHUB_REF_APPLE. SUPABASE_URL і SUPABASE_SERVICE_ROLE_KEY Supabase додає сам.
@@ -106,9 +107,11 @@ export async function handle(req: Request, env: Env, f: typeof fetch = fetch, no
     const id = Number(b.id);
     if (!Number.isInteger(id) || id <= 0) return json(400, { ok: false, error: "Некоректна задача" });
     if (!env.GITHUB_PAT) return json(500, { ok: false, error: "На сервері не задано токен GitHub" });
-    const c = await rpc("reader_job_cancel", { p_id: id });
+    const c = await rpc("reader_job_cancel2", { p_id: id });
     if (!c.ok) return json(502, { ok: false, error: "Не вдалося скасувати задачу" });
-    if (c.data !== true) return json(404, { ok: false, error: "Задача вже завершилась" });
+    if (c.data !== "waiting" && c.data !== "active") return json(404, { ok: false, error: "Задача вже завершилась" });
+    // книга ще чекала в черзі: у GitHub для неї нічого не запущено, а запуск іншої книги чіпати не можна
+    if (c.data === "waiting") return json(200, { ok: true, stopped: 0, waiting: true });
     // основний репозиторій і (якщо задано) окремий для Apple-голосів
     const targets = [{ repo: env.GITHUB_REPO || "abohdanovskyi/reader-app", pat: env.GITHUB_PAT }];
     if (env.GITHUB_REPO_APPLE && env.GITHUB_REPO_APPLE !== targets[0].repo) targets.push({ repo: env.GITHUB_REPO_APPLE, pat: env.GITHUB_PAT_APPLE || env.GITHUB_PAT });
@@ -129,6 +132,50 @@ export async function handle(req: Request, env: Env, f: typeof fetch = fetch, no
   }
 
   const endpoint = env.R2_ENDPOINT || "", bucket = env.R2_BUCKET || "", base = (env.R2_PUBLIC_BASE || "").replace(/\/$/, "");
+
+  // запуск workflow в GitHub; Apple-голоси (macOS) можуть іти в окремий репозиторій зі своїм токеном і гілкою
+  const dispatch = async (gender: string, epubUrl: string, id: number): Promise<number> => {
+    const useApple = gender === "apple" && !!env.GITHUB_REPO_APPLE;
+    const repo = useApple ? env.GITHUB_REPO_APPLE : (env.GITHUB_REPO || "abohdanovskyi/reader-app");
+    const ref = useApple ? (env.GITHUB_REF_APPLE || env.GITHUB_REF || "dev") : (env.GITHUB_REF || "dev");
+    const pat = useApple ? (env.GITHUB_PAT_APPLE || env.GITHUB_PAT) : env.GITHUB_PAT;
+    const gh = await f(`https://api.github.com/repos/${repo}/actions/workflows/voice.yml/dispatches`, {
+      method: "POST",
+      headers: {
+        Authorization: "Bearer " + pat, Accept: "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28", "User-Agent": "reader-voice", "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ ref, inputs: { epub_url: epubUrl, gender, jobs: "12", job_id: String(id) } }),
+    }).catch(() => null);
+    return gh ? gh.status : 0;
+  };
+
+  // бере з черги наступну книгу (база дозволяє лише коли нічого не йде) і запускає її; збійні пропускає й бере наступну
+  const startNext = async (): Promise<{ id: number; ok: boolean }[]> => {
+    const out: { id: number; ok: boolean }[] = [];
+    for (let i = 0; i < 6; i++) {
+      const c = await rpc("reader_queue_claim", {});
+      if (!c.ok || !c.data || typeof c.data !== "object") break;
+      const job = c.data as { id: number; gender: string; epub_url: string };
+      const head = await f(job.epub_url, { method: "HEAD" }).catch(() => null);
+      const len = head ? Number(head.headers.get("content-length") || 0) : 0;
+      if (!head || !head.ok || len < 1000 || len > MAX_EPUB) {
+        // вхідні EPUB у сховищі видаляються через добу
+        await rpc("reader_job_fail", { p_id: job.id, p_err: "EPUB уже недоступний у сховищі (вхідні файли видаляються через добу), завантажте книгу ще раз" });
+        out.push({ id: job.id, ok: false });
+        continue;
+      }
+      const st = await dispatch(job.gender, job.epub_url, job.id);
+      if (st !== 204) {
+        await rpc("reader_job_fail", { p_id: job.id, p_err: `GitHub не прийняв запуск (${st || "немає зв'язку"})` });
+        out.push({ id: job.id, ok: false });
+        continue;
+      }
+      out.push({ id: job.id, ok: true });
+      break;   // одна озвучка за раз
+    }
+    return out;
+  };
 
   if (action === "presign") {
     if (!endpoint || !bucket || !env.R2_KEY_ID || !env.R2_SECRET || !base) return json(500, { ok: false, error: "На сервері не задано ключі сховища" });
@@ -153,31 +200,25 @@ export async function handle(req: Request, env: Env, f: typeof fetch = fetch, no
     const gender = b.gender === "male" || b.gender === "apple" ? b.gender : "female";   // apple: Леся, Мілена, Samantha (macOS)
     const forWho = b.for === undefined || b.for === null || b.for === "" ? "both" : String(b.for);   // кому призначена книга: both або ключ людини
     if (!/^[a-z0-9_]{1,20}$/.test(forWho)) return json(400, { ok: false, error: "Некоректний вибір «для кого»" });
-    const job = await rpc("reader_job_create", { p_title: title, p_gender: gender, p_url: epubUrl, p_for: forWho });
+    const job = await rpc("reader_job_enqueue", { p_title: title, p_gender: gender, p_url: epubUrl, p_for: forWho });
     if (!job.ok) {
       if (job.data && job.data.code === "22023") return json(400, { ok: false, error: "Невідомий вибір «для кого»" });
-      if (job.data && job.data.code === "55006") return json(409, { ok: false, error: "Уже йде інша озвучка, дочекайтесь її завершення" });
+      if (job.data && job.data.code === "55007") return json(409, { ok: false, error: "Черга заповнена (до 5 книг), дочекайтесь завершення озвучки" });
       return json(502, { ok: false, error: "Не вдалося створити задачу" });
     }
     const id = job.data;
-    // Apple-голоси (macOS) можуть іти в окремий репозиторій зі своїм токеном і гілкою
-    const useApple = gender === "apple" && !!env.GITHUB_REPO_APPLE;
-    const repo = useApple ? env.GITHUB_REPO_APPLE : (env.GITHUB_REPO || "abohdanovskyi/reader-app");
-    const ref = useApple ? (env.GITHUB_REF_APPLE || env.GITHUB_REF || "dev") : (env.GITHUB_REF || "dev");
-    const pat = useApple ? (env.GITHUB_PAT_APPLE || env.GITHUB_PAT) : env.GITHUB_PAT;
-    const gh = await f(`https://api.github.com/repos/${repo}/actions/workflows/voice.yml/dispatches`, {
-      method: "POST",
-      headers: {
-        Authorization: "Bearer " + pat, Accept: "application/vnd.github+json",
-        "X-GitHub-Api-Version": "2022-11-28", "User-Agent": "reader-voice", "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ ref, inputs: { epub_url: epubUrl, gender, jobs: "12", job_id: String(id) } }),
-    }).catch(() => null);
-    if (!gh || gh.status !== 204) {
-      await rpc("reader_job_fail", { p_id: id, p_err: `GitHub не прийняв запуск (${gh ? gh.status : "немає зв'язку"})` });
-      return json(502, { ok: false, error: "GitHub не прийняв запуск озвучки" });
-    }
-    return json(200, { ok: true, job: id });
+    // якщо нічого не йде, ця книга (або старіша в черзі) запускається одразу, інакше стає в чергу
+    const started = await startNext();
+    const mine = started.find(x => x.id === id);
+    if (mine && !mine.ok) return json(502, { ok: false, error: "GitHub не прийняв запуск озвучки" });
+    return json(200, { ok: true, job: id, queued: !mine });
+  }
+
+  // викликає база, коли озвучка завершилась (і раз на 2 хвилини як запасний шлях): запускає наступну книгу з черги
+  if (action === "tick") {
+    if (!env.GITHUB_PAT) return json(500, { ok: false, error: "На сервері не задано токен GitHub" });
+    const started = await startNext();
+    return json(200, { ok: true, started });
   }
 
   if (action === "delete") {
