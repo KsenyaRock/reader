@@ -8,7 +8,7 @@ const ENV = {
 };
 
 type Call = { url: string; method: string; headers: Record<string, string>; body?: any };
-function fake(opts: { code?: string; full?: boolean; claimNull?: boolean; cancelState?: string; preload?: any[]; missing?: string[]; locked?: boolean; ghStatus?: number; epubLen?: number | null; link?: string | null; delStatus?: number; cancelOk?: boolean; runs?: number[]; badAudience?: boolean } = {}) {
+function fake(opts: { code?: string; full?: boolean; claimNull?: boolean; cancelState?: string; preload?: any[]; missing?: string[]; locked?: boolean; ghStatus?: number; epubLen?: number | null; link?: string | null; delStatus?: number; cancelOk?: boolean; runs?: number[]; badAudience?: boolean; stale?: { id: number; gender: string }[]; ghRuns?: number } = {}) {
   const calls: Call[] = [];
   const queue: any[] = [...(opts.preload ?? [])];   // книги, що чекають у черзі (імітація бази)
   let nextId = 42;
@@ -29,6 +29,7 @@ function fake(opts: { code?: string; full?: boolean; claimNull?: boolean; cancel
       return resp(200, id);
     }
     if (u.endsWith("/rpc/reader_queue_claim")) return resp(200, opts.claimNull ? null : (queue.shift() ?? null));
+    if (u.endsWith("/rpc/reader_stale_jobs")) return resp(200, opts.stale ?? []);
     if (u.endsWith("/rpc/reader_job_fail")) return resp(200, null);
     if (u.endsWith("/rpc/reader_voice_list")) return resp(200, { jobs: [], books: [{ id: 1, title: "Чорти", link: "https://x" }] });
     if (u.endsWith("/rpc/reader_book_link")) return resp(200, opts.link === undefined ? "https://pub-x.r2.dev/tok/Book%20One.audiobook.zip" : opts.link);
@@ -36,6 +37,7 @@ function fake(opts: { code?: string; full?: boolean; claimNull?: boolean; cancel
     if (u.endsWith("/rpc/reader_job_cancel2")) return resp(200, opts.cancelOk === false ? null : (opts.cancelState ?? "active"));
     if (u.endsWith("/rpc/reader_progress_set")) return resp(200, null);
     if (u.endsWith("/rpc/reader_progress_get")) return resp(200, body.p_book === "known000001" ? { pos: 900, total: 40000, updated: "2026-10-28T10:00:00Z" } : null);
+    if (u.includes("/actions/workflows/voice.yml/runs?") && opts.ghRuns) return resp(opts.ghRuns, {});
     if (u.includes("/actions/workflows/voice.yml/runs?")) return resp(200, { workflow_runs: u.includes("status=in_progress") ? (opts.runs ?? [555]).map(id => ({ id })) : [] });
     if (u.includes("/actions/runs/") && u.endsWith("/cancel")) return new Response(null, { status: 202 });
     if (u.startsWith("https://acc.r2.cloudflarestorage.com/")) return new Response(null, { status: opts.delStatus ?? 204 });
@@ -348,4 +350,47 @@ test("cancel: книга, що чекала в черзі, скасовуєть�
   expect(j.waiting).toBe(true);
   expect(j.stopped).toBe(0);
   expect(x.calls.some(c => c.url.includes("api.github.com"))).toBe(false);
+});
+
+test("tick: сторож закриває задачу, для якої в GitHub немає запусків, і береться наступна книга", async () => {
+  const x = fake({ stale: [{ id: 5, gender: "female" }], runs: [], preload: [PRE(8)] });
+  const r = await (await handle(post({ action: "tick", code: "good-code" }), ENV, x.f)).json();
+  expect(r.failed).toEqual([5]);
+  const fail = x.calls.find(c => c.url.endsWith("reader_job_fail"))!;
+  expect(fail.body.p_id).toBe(5);
+  expect(fail.body.p_err).toContain("без результату");
+  expect(r.started).toEqual([{ id: 8, ok: true }]);
+});
+
+test("tick: сторож не чіпає задачу, поки у GitHub є активний запуск", async () => {
+  const x = fake({ stale: [{ id: 5, gender: "female" }], runs: [555] });
+  const r = await (await handle(post({ action: "tick", code: "good-code" }), ENV, x.f)).json();
+  expect(r.failed).toEqual([]);
+  expect(x.calls.some(c => c.url.endsWith("reader_job_fail"))).toBe(false);
+});
+
+test("tick: GitHub не відповів — сторож нічого не позначає", async () => {
+  const x = fake({ stale: [{ id: 5, gender: "female" }], ghRuns: 403 });
+  const r = await (await handle(post({ action: "tick", code: "good-code" }), ENV, x.f)).json();
+  expect(r.failed).toEqual([]);
+  expect(x.calls.some(c => c.url.endsWith("reader_job_fail"))).toBe(false);
+});
+
+test("сторож: Apple-задача перевіряється в репозиторії Apple, окремо від Edge", async () => {
+  const x = fake({ stale: [{ id: 5, gender: "apple" }, { id: 6, gender: "female" }], runs: [] });
+  const env = { ...ENV, GITHUB_REPO_APPLE: "KsenyaRock/reader-apple", GITHUB_REPO: "KsenyaRock/reader" };
+  const r = await (await handle(post({ action: "tick", code: "good-code" }), env, x.f)).json();
+  expect(r.failed).toEqual([5, 6]);
+  const repos = new Set(x.calls.filter(c => c.url.includes("/runs?")).map(c => c.url.split("/repos/")[1].split("/actions")[0]));
+  expect([...repos].sort()).toEqual(["KsenyaRock/reader", "KsenyaRock/reader-apple"]);
+});
+
+test("IP клієнта передається в перевірку коду, без IP (виклик бази) — ні", async () => {
+  let x = fake();
+  const req = new Request("https://fn.test/reader-voice", { method: "POST", headers: { "cf-connecting-ip": "5.6.7.8" }, body: JSON.stringify({ action: "check", code: "good-code" }) });
+  await handle(req, ENV, x.f);
+  expect(x.calls[0].body).toEqual({ p_code: "good-code", p_ip: "5.6.7.8" });
+  x = fake();
+  await handle(post({ action: "check", code: "good-code" }), ENV, x.f);
+  expect(x.calls[0].body).toEqual({ p_code: "good-code" });
 });

@@ -1,6 +1,6 @@
 // Edge Function «reader-voice»: запуск хмарної озвучки з читалки. Вимкнути «Verify JWT» (доступ за кодом запуску).
 // Дії (POST JSON {action, code, ...}): check, presign, run, tick, list, delete, cancel, progress_get, progress_set.
-// Черга (SQL-скрипт 21): run ставить книгу в чергу (до 5 книг чекають), запускається одна за раз; tick (його викликає база) запускає наступну.
+// Черга (SQL-скрипт 21): run ставить книгу в чергу (до 5 книг чекають), запускається одна за раз; tick (його викликає база) закриває завислі запуски (SQL 23) і запускає наступну.
 // Секрети функції (Dashboard -> Edge Functions -> Secrets): R2_ENDPOINT, R2_BUCKET, R2_KEY_ID, R2_SECRET, R2_PUBLIC_BASE, GITHUB_PAT,
 // необов'язково GITHUB_REPO (abohdanovskyi/reader-app) і GITHUB_REF (dev);
 // для Apple-голосів в іншому репозиторії: GITHUB_REPO_APPLE, GITHUB_PAT_APPLE (інакше GITHUB_PAT), GITHUB_REF_APPLE. SUPABASE_URL і SUPABASE_SERVICE_ROLE_KEY Supabase додає сам.
@@ -70,7 +70,9 @@ export async function handle(req: Request, env: Env, f: typeof fetch = fetch, no
   };
 
   // 1. код запуску
-  const auth = await rpc("reader_voice_auth", { p_code: String(b.code || "") });
+  // IP клієнта потрібна для блокування підбору коду (рахується окремо для кожної адреси); виклики самої бази йдуть без IP
+  const ip = (req.headers.get("cf-connecting-ip") || (req.headers.get("x-forwarded-for") || "").split(",").pop() || "").trim().slice(0, 64);
+  const auth = await rpc("reader_voice_auth", ip ? { p_code: String(b.code || ""), p_ip: ip } : { p_code: String(b.code || "") });
   if (!auth.ok) {
     if (auth.data && auth.data.code === "54000") return json(429, { ok: false, error: "Забагато спроб, спробуйте за 15 хвилин" });
     return json(502, { ok: false, error: "База недоступна" });
@@ -214,11 +216,44 @@ export async function handle(req: Request, env: Env, f: typeof fetch = fetch, no
     return json(200, { ok: true, job: id, queued: !mine });
   }
 
-  // викликає база, коли озвучка завершилась (і раз на 2 хвилини як запасний шлях): запускає наступну книгу з черги
+  // Сторож: задача давно запущена, а в GitHub для її репозиторію немає ні активного, ні черговий запуску — запуск завершився без результату.
+  // Якщо GitHub не відповів, нічого не робимо (невідомо). Повертає id задач, позначених помилкою.
+  const watchdog = async (): Promise<number[]> => {
+    const st = await rpc("reader_stale_jobs", { p_min: 10 });
+    const stale: { id: number; gender: string }[] = st.ok && Array.isArray(st.data) ? st.data : [];
+    if (!stale.length) return [];
+    const failed: number[] = [];
+    const alive = new Map<string, boolean | null>();   // репозиторій -> є активний запуск (null: невідомо)
+    for (const job of stale) {
+      const useApple = job.gender === "apple" && !!env.GITHUB_REPO_APPLE;
+      const repo = useApple ? env.GITHUB_REPO_APPLE! : (env.GITHUB_REPO || "abohdanovskyi/reader-app");
+      const pat = useApple ? (env.GITHUB_PAT_APPLE || env.GITHUB_PAT) : env.GITHUB_PAT;
+      if (!alive.has(repo)) {
+        const gh = { Authorization: "Bearer " + pat, Accept: "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28", "User-Agent": "reader-voice" };
+        let any = false, known = true;
+        for (const status of ["in_progress", "queued"]) {
+          const r = await f(`https://api.github.com/repos/${repo}/actions/workflows/voice.yml/runs?status=${status}&per_page=5`, { headers: gh }).catch(() => null);
+          if (!r || !r.ok) { known = false; break; }
+          const runs = (await r.json().catch(() => null))?.workflow_runs;
+          if (!Array.isArray(runs)) { known = false; break; }
+          if (runs.length) any = true;
+        }
+        alive.set(repo, known ? any : null);
+      }
+      if (alive.get(repo) === false) {
+        await rpc("reader_job_fail", { p_id: job.id, p_err: "Запуск завершився без результату, спробуйте озвучити ще раз" });
+        failed.push(job.id);
+      }
+    }
+    return failed;
+  };
+
+  // викликає база, коли озвучка завершилась (і раз на 5 хвилин як запасний шлях): перевіряє завислі запуски й запускає наступну книгу з черги
   if (action === "tick") {
     if (!env.GITHUB_PAT) return json(500, { ok: false, error: "На сервері не задано токен GitHub" });
+    const failed = await watchdog();
     const started = await startNext();
-    return json(200, { ok: true, started });
+    return json(200, { ok: true, started, failed });
   }
 
   if (action === "delete") {

@@ -15,9 +15,9 @@ begin
     perform public.reader_voice_auth(code);
     raise exception 'блокування після 5 помилок не спрацювало';
   exception when program_limit_exceeded then null; end;
-  update public.reader_settings set fail_since = now() - interval '16 minutes';
+  update public.reader_auth_fails set since = now() - interval '16 minutes';
   if public.reader_voice_auth(code) is not true then raise exception 'після паузи код не працює'; end if;
-  select fail_count into n from public.reader_settings;
+  select count(*) into n from public.reader_auth_fails;
   if n <> 0 then raise exception 'лічильник не скинуто: %', n; end if;
 
   -- створення задачі: https обов'язково, одна активна за раз
