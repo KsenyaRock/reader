@@ -1,7 +1,7 @@
 -- Читалка: зведений рядок «зараз озвучується…» у списку озвучок. Запускати в Supabase -> SQL Editor -> New query -> Run.
 -- Можна запускати повторно. Потрібні скрипти 20 і 21. Сайт (Netlify) не змінюється: читалка просто показує ще один рядок.
 -- Якщо йде озвучка, яку цей користувач не бачить (чужа «тільки для…»), у список додається рядок без назви книги:
---   «Зараз озвучується: Ксенія, голос Edge · у черзі всього: 3 · орієнтовно до 14:40».
+--   назва «Черга до ≈14:40 · книг: 3 · Edge», під нею «озвучується… · для: Ксенія» (назва коротка, бо довгі рядки в читалці обрізаються).
 -- Час оцінюється за тривалістю останніх готових озвучок цим голосом (мінімум 20 хв на книгу), тож він приблизний.
 -- Рядок має id 0: кнопка «Скасувати» біля нього нічого не скасує (сервер відповість «Некоректна задача»).
 create or replace function public.reader_voice_list(p_me text default null) returns jsonb
@@ -40,11 +40,10 @@ begin
   end loop;
 
   if h_seen then
-    ttl := case when h_running then 'Зараз озвучується: ' else 'У черзі: ' end
-          || coalesce((select label from public.reader_people where key = h_key), h_key) || ', голос ' || h_voice
-          || ' · у черзі всього: ' || n
-          || ' · орієнтовно до ' || to_char((now() + make_interval(mins => ceil(total)::int)) at time zone tz, 'HH24:MI');
-    sumrow := jsonb_build_object('id', 0, 'title', ttl, 'status', 'running', 'error', null, 'created', now(), 'audience', 'both');
+    ttl := 'Черга до ≈' || to_char((now() + make_interval(mins => ceil(total)::int)) at time zone tz, 'HH24:MI')
+          || ' · книг: ' || n || ' · ' || h_voice;
+    sumrow := jsonb_build_object('id', 0, 'title', ttl, 'status', case when h_running then 'running' else 'queued' end,
+                                 'error', null, 'created', now(), 'audience', h_key);
     jobs := jsonb_build_array(sumrow) || jobs;
   end if;
 

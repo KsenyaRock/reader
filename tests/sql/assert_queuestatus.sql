@@ -19,7 +19,7 @@ begin
   -- Олег бачить зведений рядок без назви чужої книги
   j := public.reader_voice_list('anton');
   t := j->'jobs'->0->>'title';
-  if (j->'jobs'->0->>'id')::bigint <> 0 or t not like 'Зараз озвучується: Анна, голос Edge · у черзі всього: 2 · орієнтовно до __:__' then raise exception 'рядок Олега: %', j; end if;
+  if (j->'jobs'->0->>'id')::bigint <> 0 or t not like 'Черга до ≈__:__ · книг: 2 · Edge' or j->'jobs'->0->>'audience' <> 'ksenia' or j->'jobs'->0->>'status' <> 'running' then raise exception 'рядок Олега: %', j; end if;
   if t like '%Секретна%' then raise exception 'назва чужої книги витекла'; end if;
   if (select count(*) from jsonb_array_elements(j->'jobs') x where x->>'title' = 'Книга Олега') <> 1 then raise exception 'власна книга зникла'; end if;
   if exists (select 1 from jsonb_array_elements(j->'jobs') x where x->>'title' = 'Секретна книга Анни') then raise exception 'Олег бачить чужу задачу'; end if;
