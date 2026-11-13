@@ -7,7 +7,8 @@
 Голос Apple (GENDER=apple) іде в два етапи (STAGE): apple-synth на macOS (запис у теку APPLE_DIR) і apple-pack на Linux
 (збірка книги з APPLE_DIR); вхідний EPUB видаляється лише після другого етапу або при помилці.
 Або на кількох серверах: apple-shard (SHARD із SHARDS; запис своєї частки, mp3, архів у тимчасову теку сховища tmp/...),
-потім apple-join на Linux (збірка книги з частин, публікація, прибирання tmp/); apple-cleanup прибирає tmp/ після збою."""
+потім apple-join на Linux (збірка книги з частин, публікація, прибирання tmp/); apple-cleanup прибирає tmp/ після збою.
+Голоси Edge так само можна розподілити: edge-shard (SHARD із SHARDS), edge-join, edge-cleanup."""
 import hashlib
 import hmac
 import http.client
@@ -149,6 +150,81 @@ def shards_from_env(env=os.environ):
     return shard, shards
 
 
+def put_part(cfg, url, kind, shard, shards, part):
+    """Кладе архів частини kind-<shard>.zip у тимчасову теку сховища (3 спроби)."""
+    for attempt in range(1, 4):
+        try:
+            T.s3_put(cfg, f"{tmp_prefix(url)}/{kind}-{shard}.zip", part)
+            break
+        except Exception as e:  # noqa: BLE001
+            if attempt == 3:
+                raise RuntimeError(f"частину {shard + 1} не вдалося покласти в сховище: {e}")
+            time.sleep(3 * attempt)
+    print(f"Частину {shard + 1} з {shards} покладено в сховище ({part.stat().st_size // 1048576} МБ)", flush=True)
+
+
+def get_parts(cfg, url, kind, shards, dest, work):
+    """Забирає всі частини kind-*.zip і розпаковує в dest."""
+    dest.mkdir(parents=True, exist_ok=True)
+    started = time.time()
+    for i in range(shards):
+        f = work / f"{kind}-{i}.zip"
+        st = s3_request(cfg, "GET", f"{tmp_prefix(url)}/{kind}-{i}.zip", dest=f)
+        if st != 200:
+            raise RuntimeError(f"частина {i + 1} з {shards} не знайдена в сховищі (код {st})")
+        with zipfile.ZipFile(f) as z:
+            z.extractall(dest)
+        f.unlink()
+    print(f"Частини забрано за {int(time.time() - started)} с", flush=True)
+
+
+def edge_plan(epub, gender):
+    """План Edge-озвучки (однаковий на кожному сервері): книга, частини, робоча тека, id, імена фрагментів по порядку."""
+    epub = Path(epub)
+    book = T.read_epub(epub)
+    if not book["chapters"]:
+        raise RuntimeError("У книзі не знайдено тексту (можливо, файл захищений DRM)")
+    parts = T.plan_book(book, T.default_cyr_for(book))
+    book_id = A.book_id_of(epub)
+    workdir = T.work_root() / hashlib.sha1(f"{book_id}{gender}+0%".encode()).hexdigest()[:10]   # як у T.convert
+    workdir.mkdir(parents=True, exist_ok=True)
+    items = [(T.chunk_name(pi, ci), None, c["text"]) for pi, p in enumerate(parts) for ci, c in enumerate(p["chunks"])]
+    return book, parts, workdir, book_id, items
+
+
+def edge_shard(epub, gender, jobs, cfg, url, work):
+    """Сервер SHARD із SHARDS (Linux): озвучує свою частку фрагментів Edge і кладе їх у тимчасову теку сховища."""
+    import asyncio
+    shard, shards = shards_from_env()
+    book, parts, workdir, _, items = edge_plan(epub, gender)
+    mine = {n for n, _, _ in A.shard_tasks(items, shard, shards)}
+    chars = sum(len(t) for n, _, t in items if n in mine)
+    print(f"«{T.pub(book['title'])}»: {len(items)} фрагментів, сервер {shard + 1} з {shards}: {len(mine)} фрагментів, "
+          f"{chars} символів, паралельних запитів {jobs}", flush=True)
+    started = time.time()
+    asyncio.run(T.run_synthesis(parts, workdir, gender, "+0%", jobs, only=mine))
+    print(f"Озвучено за {int(time.time() - started)} с, повторів {T.STATS.get('retries', 0)}", flush=True)
+    part = work / f"edge-{shard}.zip"
+    with zipfile.ZipFile(part, "w", zipfile.ZIP_STORED) as z:
+        for n in sorted(mine):
+            z.write(workdir / n, n)
+    put_part(cfg, url, "edge", shard, shards, part)
+
+
+def edge_join(epub, gender, cfg, url, work):
+    """Linux: забирає озвучені фрагменти з усіх серверів і збирає книгу. Повертає шлях до zip."""
+    _, shards = shards_from_env()
+    book, parts, workdir, book_id, _ = edge_plan(epub, gender)
+    get_parts(cfg, url, "edge", shards, workdir, work)
+    for pi, p in enumerate(parts):
+        for ci, c in enumerate(p["chunks"]):
+            c["path"] = workdir / T.chunk_name(pi, ci)
+    missing = [str(c["path"].name) for p in parts for c in p["chunks"] if not c["path"].exists()]
+    if missing:
+        raise RuntimeError(f"бракує {len(missing)} озвучених фрагментів (перший: {missing[0]})")
+    return T.assemble(book, parts, epub, work / "out", workdir, book_id)
+
+
 def apple_shard(epub, apple_dir, cfg, url, work):
     """Сервер SHARD із SHARDS: записує свою частку голосом Apple, перетворює в mp3 і кладе архів у тимчасову теку сховища."""
     shard, shards = shards_from_env()
@@ -160,32 +236,14 @@ def apple_shard(epub, apple_dir, cfg, url, work):
         z.write(Path(apple_dir) / "plan.json", "plan.json")
         for m in mp3s.values():
             z.write(m, m.name)
-    for attempt in range(1, 4):
-        try:
-            T.s3_put(cfg, f"{tmp_prefix(url)}/apple-{shard}.zip", part)
-            break
-        except Exception as e:  # noqa: BLE001
-            if attempt == 3:
-                raise RuntimeError(f"частину {shard + 1} не вдалося покласти в сховище: {e}")
-            time.sleep(3 * attempt)
-    print(f"Частину {shard + 1} з {shards} покладено в сховище ({part.stat().st_size // 1048576} МБ)", flush=True)
+    put_part(cfg, url, "apple", shard, shards, part)
 
 
 def apple_join(epub, cfg, url, work):
     """Linux: забирає частини з усіх серверів, збирає книгу. Повертає шлях до zip."""
     _, shards = shards_from_env()
     got = work / "join"
-    got.mkdir(parents=True, exist_ok=True)
-    started = time.time()
-    for i in range(shards):
-        f = work / f"apple-{i}.zip"
-        st = s3_request(cfg, "GET", f"{tmp_prefix(url)}/apple-{i}.zip", dest=f)
-        if st != 200:
-            raise RuntimeError(f"частина {i + 1} з {shards} не знайдена в сховищі (код {st})")
-        with zipfile.ZipFile(f) as z:
-            z.extractall(got)
-        f.unlink()
-    print(f"Частини забрано за {int(time.time() - started)} с", flush=True)
+    get_parts(cfg, url, "apple", shards, got, work)
     plan = json.loads((got / "plan.json").read_text(encoding="utf-8"))
     mp3s = {n: got / (n[:-4] + ".mp3") for p in plan["parts"] for n in p["files"] if (got / (n[:-4] + ".mp3")).exists()}
     book, book_id = T.read_epub(epub), A.book_id_of(epub)
@@ -194,13 +252,13 @@ def apple_join(epub, cfg, url, work):
     return A.assemble(plan, mp3s, book, epub, work / "out", workdir, book_id)
 
 
-def apple_cleanup(cfg, url):
-    """Прибирає тимчасові частини озвучки зі сховища (після збірки або збою). Ніколи не падає."""
+def apple_cleanup(cfg, url, kind="apple"):
+    """Прибирає тимчасові частини озвучки (kind: apple або edge) зі сховища (після збірки або збою). Ніколи не падає."""
     _, shards = shards_from_env()
     n = 0
     for i in range(shards):
         try:
-            n += s3_delete(cfg, f"{tmp_prefix(url)}/apple-{i}.zip")
+            n += s3_delete(cfg, f"{tmp_prefix(url)}/{kind}-{i}.zip")
         except Exception:  # noqa: BLE001
             pass
     print(f"Тимчасові частини прибрано: {n}", flush=True)
@@ -227,6 +285,9 @@ def run(url, gender, jobs, cfg, nc, job, stage=""):
     if stage == "apple-join":
         print("Збираю книгу з частин, записаних на кількох серверах")
         zip_path = apple_join(epub, cfg, url, work)
+    elif stage == "edge-join":
+        print("Збираю книгу з частин, озвучених на кількох серверах")
+        zip_path = edge_join(epub, gender, cfg, url, work)
     elif stage == "apple-pack":
         print("Збираю книгу з записаного голосу Apple")
         zip_path = A.pack(apple_dir, epub, work / "out")
@@ -241,18 +302,22 @@ def run(url, gender, jobs, cfg, nc, job, stage=""):
         if stage == "apple-shard":
             apple_shard(epub, apple_dir, cfg, url, work)
             return
+        if stage == "edge-shard":
+            edge_shard(epub, gender, jobs, cfg, url, work)
+            return
         out = work / "out"
         print(f"Озвучую: голос {'чоловічий' if gender == 'male' else 'жіночий'}, паралельних запитів {jobs}")
         zip_path = T.convert(epub, out, gender, "+0%", jobs)
     link = T.publish(zip_path, cfg=cfg, nc=nc, clipboard=False)
     if not link:
         raise SystemExit("Книгу озвучено, але завантажити в сховище не вдалося")
-    if stage == "apple-join":
-        apple_cleanup(cfg, url)
+    if stage in ("apple-join", "edge-join"):
+        apple_cleanup(cfg, url, stage.split("-")[0])
     print("Готово.")
 
 
 APPLE_STAGES = ("apple-synth", "apple-pack", "apple-shard", "apple-join", "apple-cleanup")
+EDGE_STAGES = ("edge-shard", "edge-join", "edge-cleanup")
 
 
 def main():
@@ -262,6 +327,8 @@ def main():
     g = os.environ.get("GENDER", "female").lower()
     gender = g if g in ("male", "apple") else "female"
     stage = os.environ.get("STAGE", "").strip()
+    if gender != "apple" and stage not in ("",) + EDGE_STAGES:
+        raise SystemExit("Для голосів Edge STAGE має бути порожнім або edge-shard / edge-join / edge-cleanup")
     if (gender == "apple") != (stage in APPLE_STAGES):
         raise SystemExit("Голос Apple озвучується етапами: STAGE=apple-synth (macOS), потім STAGE=apple-pack; "
                          "або на кількох серверах: STAGE=apple-shard (SHARD, SHARDS), потім STAGE=apple-join")
@@ -271,13 +338,13 @@ def main():
         jobs = 12
     job = os.environ.get("JOB_ID", "").strip() or None
     cfg = storage_from_env()
-    if stage == "apple-cleanup":          # після збою: лише прибрати тимчасові частини
-        apple_cleanup(cfg, url)
+    if stage in ("apple-cleanup", "edge-cleanup"):          # після збою: лише прибрати тимчасові частини
+        apple_cleanup(cfg, url, stage.split("-")[0])
         return
     nc = notify_from_env()
-    if stage not in ("apple-pack", "apple-join"):
+    if stage not in ("apple-pack", "apple-join", "edge-join"):
         job_update(nc, job, "running")
-    keep_input = stage in ("apple-synth", "apple-shard")   # EPUB ще потрібен наступному етапу
+    keep_input = stage in ("apple-synth", "apple-shard", "edge-shard")   # EPUB ще потрібен наступному етапу
     try:
         run(url, gender, jobs, cfg, nc, job, stage)
     except BaseException as e:  # noqa: BLE001  (SystemExit теж: текст причини показуємо в читалці)
@@ -289,7 +356,7 @@ def main():
             raise SystemExit(1) from None
         raise
     else:
-        if stage not in ("apple-synth", "apple-shard"):
+        if stage not in ("apple-synth", "apple-shard", "edge-shard"):
             job_update(nc, job, "done")
     finally:
         key = None if keep_input else input_key(cfg, url)

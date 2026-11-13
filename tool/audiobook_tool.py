@@ -603,13 +603,20 @@ def dry_run(epub):
     print(f"Разом ~{total} символів, орієнтовно {fmt_dur(total / 15)} звуку")
 
 
-async def run_synthesis(parts, workdir, gender, rate, concurrency):
+def chunk_name(pi, ci):
+    return f"{pi:04d}_{ci:04d}.mp3"
+
+
+async def run_synthesis(parts, workdir, gender, rate, concurrency, only=None):
+    """only: множина імен фрагментів (chunk_name), які озвучує цей сервер; None = усі (звичайна озвучка)."""
     sem = asyncio.Semaphore(concurrency)
     jobs = []
     for pi, p in enumerate(parts):
         for ci, c in enumerate(p["chunks"]):
-            path = workdir / f"{pi:04d}_{ci:04d}.mp3"
+            path = workdir / chunk_name(pi, ci)
             c["path"] = path
+            if only is not None and path.name not in only:
+                continue
             if not path.exists():
                 jobs.append((c, path))
     total_chars = sum(len(c["text"]) for c, _ in jobs) or 1

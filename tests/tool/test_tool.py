@@ -982,6 +982,62 @@ class CloudJob(unittest.TestCase):
             self.cj.shards_from_env({"SHARD": "5", "SHARDS": "5"})
         self.assertEqual(self.cj.shards_from_env({}), (0, 1))
 
+    def _edge_sharded(self, shards, drop_part=None):
+        import shutil, unittest.mock as mock
+        url = "https://files.example/b/in/tok/book.epub"
+        keys = ("JOB_ID", "STAGE", "SHARD", "SHARDS", "OZVUCHKA_WORK")
+        self.addCleanup(lambda: [os.environ.pop(k, None) for k in keys])
+        os.environ.update({"JOB_ID": "11", "EPUB_URL": url, "SHARDS": str(shards)})
+        with mock.patch.object(self.cj, "download", lambda u, dest: shutil.copy(self.epub, dest)):
+            for i in range(shards):        # кожен сервер зі своєю робочою текою, як на окремих машинах
+                os.environ.update({"STAGE": "edge-shard", "SHARD": str(i), "OZVUCHKA_WORK": os.path.join(self.dir, f"w{i}")})
+                with redirect_stdout(io.StringIO()):
+                    self.cj.main()
+            if drop_part is not None:
+                self.got["objects"].pop(f"/b/{self.cj.tmp_prefix(url)}/edge-{drop_part}.zip")
+            os.environ.update({"STAGE": "edge-join", "OZVUCHKA_WORK": os.path.join(self.dir, "wj")})
+            with redirect_stdout(io.StringIO()):
+                self.cj.main()
+        return url
+
+    def test_edge_sharded_builds_same_book_as_single(self):
+        import shutil, unittest.mock as mock
+        url = self._edge_sharded(3)
+        prefix = f"/b/{self.cj.tmp_prefix(url)}/"
+        parts = sorted(p for p in self.got["put_paths"] if p.startswith(prefix))
+        self.assertEqual(parts, [prefix + f"edge-{i}.zip" for i in range(3)])
+        self.assertEqual([r.get("p_status") for r in self.got["rpc"] if "p_status" in r], ["running"] * 3 + ["done"])
+        self.assertEqual(sorted(self.got["delete"]), sorted(parts + ["/b/in/tok/book.epub"]))
+        book = [v for k, v in self.got["objects"].items() if k.endswith(".audiobook.zip")]
+        self.assertEqual(len(book), 1)
+        sharded = zipfile.ZipFile(io.BytesIO(book[0]))
+        os.environ["OZVUCHKA_WORK"] = os.path.join(self.dir, "w-single")   # окрема тека: усе озвучується заново
+        with redirect_stdout(io.StringIO()):
+            single = zipfile.ZipFile(T.convert(self.epub, os.path.join(self.dir, "single")))
+        ms, m1 = json.loads(sharded.read("manifest.json")), json.loads(single.read("manifest.json"))
+        self.assertEqual([c["title"] for c in ms["chapters"]], [c["title"] for c in m1["chapters"]])
+        for c in m1["chapters"]:
+            self.assertEqual(sharded.read(c["file"]), single.read(c["file"]), "звук той самий, що й на одному сервері")
+        self.assertEqual(sharded.read("text.json"), single.read("text.json"))
+
+    def test_edge_join_fails_when_part_missing(self):
+        with self.assertRaises(RuntimeError):
+            self._edge_sharded(2, drop_part=0)
+        self.assertEqual(self.got["rpc"][-1]["p_status"], "failed")
+        self.assertIn("частина 1 з 2", self.got["rpc"][-1]["p_err"])
+
+    def test_edge_stage_rules(self):
+        os.environ.update({"STAGE": "apple-shard"})
+        self.addCleanup(lambda: os.environ.pop("STAGE", None))
+        with self.assertRaises(SystemExit):
+            self.cj.main()
+        os.environ.update({"STAGE": "edge-cleanup", "SHARDS": "3"})
+        self.addCleanup(lambda: os.environ.pop("SHARDS", None))
+        with redirect_stdout(io.StringIO()):
+            self.cj.main()
+        self.assertEqual(len(self.got["delete"]), 3)
+        self.assertEqual(self.got["rpc"], [])
+
     def test_apple_synth_failure_marks_failed_and_deletes_input(self):
         import shutil, unittest.mock as mock
         import apple_voice
