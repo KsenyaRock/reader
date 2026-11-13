@@ -15,6 +15,7 @@ import hmac
 import http.client
 import json
 import os
+import random
 import sys
 import tempfile
 import time
@@ -226,12 +227,34 @@ def edge_join(epub, gender, cfg, url, work):
     return T.assemble(book, parts, epub, work / "out", workdir, book_id)
 
 
+def safe_reason(msg):
+    """Категорія помилки для публічного журналу: без назв книг, посилань і уривків тексту."""
+    if msg.startswith("сховище:"):
+        return ": " + msg[:90]
+    for prefix, label in (("голос ", "запис голосу"), ("не вдалося перетворити", "перетворення в mp3"),
+                          ("фрагмент ", "збірка: бракує фрагмента"), ("частина ", "збірка: бракує частини"),
+                          ("бракує ", "збірка: бракує фрагментів"), ("EPUB", "EPUB")):
+        if msg.startswith(prefix):
+            return ": " + label
+    return ""
+
+
 APPLE_SAY = "say"        # у тестах підміняється заглушкою
 APPLE_FFMPEG = None      # None = imageio-ffmpeg або ffmpeg із системи
 
 
 def s3_exists(cfg, key):
-    return s3_request(cfg, "HEAD", key) == 200
+    """Чи є об'єкт у сховищі (HEAD); тимчасові збої мережі повторюються."""
+    for attempt in range(1, 6):
+        try:
+            code = s3_request(cfg, "HEAD", key)
+            if code in (200, 404):
+                return code == 200
+            err = f"код {code}"
+        except Exception as e:  # noqa: BLE001
+            err = type(e).__name__
+        time.sleep(min(2 ** attempt, 20) + random.random())
+    raise RuntimeError(f"сховище: перевірка фрагмента не вдалася ({err})")
 
 
 def seg_key(url, kind, name):
@@ -241,14 +264,15 @@ def seg_key(url, kind, name):
 
 
 def put_small(cfg, key, path):
-    for attempt in range(1, 4):
+    for attempt in range(1, 7):
         try:
             T.s3_put(cfg, key, path, content_type="application/octet-stream")
             return
         except Exception as e:  # noqa: BLE001
-            if attempt == 3:
-                raise RuntimeError(f"не вдалося покласти фрагмент у сховище: {e}")
-            time.sleep(2 * attempt)
+            if attempt == 6:
+                code = "".join(ch for ch in str(e)[:40] if ch.isdigit())[:3]
+                raise RuntimeError(f"сховище: не вдалося покласти фрагмент ({type(e).__name__} {code})".strip())
+            time.sleep(min(2 ** attempt, 30) + random.random())
 
 
 def steal_order(lists, shard):
@@ -489,7 +513,7 @@ def main():
         job_update(nc, job, "failed", msg[:300])
         keep_input = stage == "apple-shard"   # EPUB потрібен кроку прибирання (він його й видалить)
         if os.environ.get("GITHUB_ACTIONS") == "true":   # журнал публічний: причина (з назвою або уривком) лише в читалці
-            print(f"Озвучка перервалась ({type(e).__name__}); подробиці в читалці")
+            print(f"Озвучка перервалась ({type(e).__name__}{safe_reason(msg)}); подробиці в читалці")
             raise SystemExit(1) from None
         raise
     else:
