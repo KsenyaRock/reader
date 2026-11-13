@@ -800,6 +800,9 @@ class CloudJob(unittest.TestCase):
             def do_PUT(self):
                 got["objects"][self.path] = self._b(); got["put"] += 1; got["put_paths"].append(self.path)
                 self.send_response(200); self.send_header("Content-Length", "0"); self.end_headers()
+            def do_HEAD(self):
+                code = 200 if self.path in got["objects"] else 404
+                self.send_response(code); self.send_header("Content-Length", "0"); self.end_headers()
             def do_GET(self):
                 body = got["objects"].get(self.path)
                 if body is None or "Credential=" not in self.headers.get("authorization", ""):
@@ -922,59 +925,82 @@ class CloudJob(unittest.TestCase):
         self.assertEqual(self.got["rpc"][-1]["p_status"], "done")
         self.assertEqual(len(self.got["delete"]), 1, "після збірки вхідний EPUB видалено")
 
-    def _apple_sharded(self, shards, fail_join_part=None):
+    def _apple_sharded(self, shards, run=None, drop_seg=None):
         import shutil, unittest.mock as mock
-        import apple_voice
         url = "https://files.example/b/in/tok/book.epub"
         keys = ("GENDER", "APPLE_DIR", "JOB_ID", "STAGE", "SHARD", "SHARDS", "APPLE_JOBS")
         self.addCleanup(lambda: [os.environ.pop(k, None) for k in keys])
         os.environ.update({"GENDER": "apple", "JOB_ID": "9", "EPUB_URL": url, "SHARDS": str(shards), "APPLE_JOBS": "2"})
-        real_synth, real_mp3 = apple_voice.synth, apple_voice.to_mp3
         with mock.patch.object(self.cj, "download", lambda u, dest: shutil.copy(self.epub, dest)), \
-             mock.patch.object(apple_voice, "synth", lambda e, d, jobs=3, shard=0, shards=1: real_synth(e, d, jobs, say=FAKE_SAY, shard=shard, shards=shards)), \
-             mock.patch.object(apple_voice, "to_mp3", lambda sd, names, od, ffmpeg=None, jobs=4: real_mp3(sd, names, od, ffmpeg=FAKE_FFMPEG, jobs=jobs)):
-            for i in range(shards):        # кожен сервер окремо, зі своєю текою
+             mock.patch.object(self.cj, "APPLE_SAY", FAKE_SAY), mock.patch.object(self.cj, "APPLE_FFMPEG", FAKE_FFMPEG):
+            for i in (run if run is not None else range(shards)):
                 os.environ.update({"STAGE": "apple-shard", "SHARD": str(i), "APPLE_DIR": os.path.join(self.dir, f"srv{i}")})
-                with redirect_stdout(io.StringIO()):
+                with redirect_stdout(io.StringIO()) as out:
                     self.cj.main()
-            if fail_join_part is not None:
-                self.got["objects"].pop(f"/b/{self.cj.tmp_prefix(url)}/apple-{fail_join_part}.zip")
+                self.last_out = out.getvalue()
+            if drop_seg is not None:
+                self.got["objects"].pop(f"/b/{self.cj.seg_key(url, 'seg', drop_seg)}")
             os.environ["STAGE"] = "apple-join"
             with redirect_stdout(io.StringIO()):
                 self.cj.main()
         return url
 
-    def test_apple_sharded_builds_same_book(self):
+    def _segs(self, url, kind):
+        import apple_voice
+        names = [t[0] for t in apple_voice.build_plan(self.epub)[1]]
+        return [n for n in names if f"/b/{self.cj.seg_key(url, kind, n if kind != 'seg' else n[:-4] + '.mp3')}" in self.got["put_paths"]]
+
+    def test_apple_first_server_steals_rest_others_skip(self):
+        import apple_voice
+        url = self._apple_sharded(3, run=[0])         # працює лише перший сервер: він робить своє і забирає решту
+        names = [t[0] for t in apple_voice.build_plan(self.epub)[1]]
+        lists = [[t[0] for t in apple_voice.shard_tasks(apple_voice.build_plan(self.epub)[1], s, 3)] for s in range(3)]
+        self.assertEqual(sorted(self._segs(url, "seg")), sorted(names), "усі фрагменти готові")
+        self.assertEqual(sorted(self._segs(url, "own")), sorted(lists[0]))
+        self.assertEqual(sorted(self._segs(url, "steal")), sorted(lists[1] + lists[2]))
+        self.assertIn("reader_book_ready", self.got["rpc_names"])
+
+    def test_apple_late_servers_find_nothing_left(self):
+        url = self._apple_sharded(3, run=[1, 0, 2])
+        puts = [p for p in self.got["put_paths"] if "/seg/" in p]
+        self.assertEqual(len(puts), len(set(puts)), "жоден фрагмент не записано двічі")
+        self.assertIn("пропущено (зробив інший)", self.last_out)
+
+    def test_apple_sharded_builds_same_book_and_cleans_up(self):
         import apple_voice
         url = self._apple_sharded(3)
-        prefix = f"/b/{self.cj.tmp_prefix(url)}/"
-        parts = [p for p in self.got["put_paths"] if p.startswith(prefix)]
-        self.assertEqual(sorted(parts), [prefix + f"apple-{i}.zip" for i in range(3)], "кожен сервер поклав свою частину")
-        self.assertEqual(self.got["put"], 4, "3 частини + готова книга")
         self.assertEqual([r.get("p_status") for r in self.got["rpc"] if "p_status" in r], ["running"] * 3 + ["done"])
-        self.assertIn("reader_book_ready", self.got["rpc_names"])
-        self.assertEqual(sorted(self.got["delete"]), sorted([p for p in parts] + ["/b/in/tok/book.epub"]), "тимчасові частини і вхідний EPUB прибрано")
         book = [v for k, v in self.got["objects"].items() if k.endswith(".audiobook.zip")]
         self.assertEqual(len(book), 1)
-        z = zipfile.ZipFile(io.BytesIO(book[0]))
-        man = json.loads(z.read("manifest.json"))
+        man = json.loads(zipfile.ZipFile(io.BytesIO(book[0])).read("manifest.json"))
         self.assertEqual([c["title"] for c in man["chapters"]], ["Розділ перший", "Глава вторая"])
         self.assertTrue(man["text"])
-        self.assertNotIn("tmp/", json.dumps(self.got["rpc"]), "у читалку не йде посилання на тимчасові файли")
+        left = [k for k in self.got["objects"] if "/tmp/" in k]
+        self.assertEqual(left, [], "фрагменти й позначки прибрано")
+        self.assertIn("/b/in/tok/book.epub", self.got["delete"])
+        self.assertNotIn("tmp/", json.dumps(self.got["rpc"]))
 
-    def test_apple_join_fails_when_part_missing(self):
+    def test_apple_join_fails_when_segment_missing(self):
+        import apple_voice
+        first = apple_voice.build_plan(self.epub)[1][0][0]
         with self.assertRaises(RuntimeError):
-            self._apple_sharded(2, fail_join_part=1)
+            self._apple_sharded(2, drop_seg=first[:-4] + ".mp3")
         self.assertEqual(self.got["rpc"][-1]["p_status"], "failed")
-        self.assertIn("частина 2 з 2", self.got["rpc"][-1]["p_err"])
+        self.assertIn("не знайдено", self.got["rpc"][-1]["p_err"])
 
-    def test_apple_cleanup_only_deletes_tmp(self):
+    def test_steal_order_takes_tails_first(self):
+        lists = [["a1", "a2", "a3"], ["b1", "b2"], ["c1", "c2", "c3"]]
+        self.assertEqual(self.cj.steal_order(lists, 0), ["b2", "c3", "b1", "c2", "c1"])
+
+    def test_apple_cleanup_removes_segments_and_input(self):
+        import shutil, unittest.mock as mock
         url = "https://files.example/b/in/tok/book.epub"
         os.environ.update({"GENDER": "apple", "STAGE": "apple-cleanup", "SHARDS": "5", "EPUB_URL": url, "JOB_ID": "3"})
         self.addCleanup(lambda: [os.environ.pop(k, None) for k in ("GENDER", "STAGE", "SHARDS", "JOB_ID")])
-        with redirect_stdout(io.StringIO()):
+        with mock.patch.object(self.cj, "download", lambda u, dest: shutil.copy(self.epub, dest)), redirect_stdout(io.StringIO()):
             self.cj.main()
-        self.assertEqual(self.got["delete"], [f"/b/{self.cj.tmp_prefix(url)}/apple-{i}.zip" for i in range(5)])
+        self.assertTrue(any("/seg/" in d for d in self.got["delete"]) and any("/steal/" in d for d in self.got["delete"]))
+        self.assertIn("/b/in/tok/book.epub", self.got["delete"])
         self.assertEqual(self.got["rpc"], [], "стан задачі не чіпає (це робить окремий крок)")
 
     def test_bad_shard_numbers_refused(self):

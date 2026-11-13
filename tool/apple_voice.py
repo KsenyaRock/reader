@@ -64,6 +64,37 @@ def shard_tasks(tasks, shard=0, shards=1):
     return out
 
 
+def record(task, outdir, say="say"):
+    """Записує один сегмент (name, voice, text) голосом Apple у outdir/name (.m4a). Два спроби, потім помилка з уривком."""
+    name, voice, text = task
+    outdir = Path(outdir)
+    src = outdir / (name + ".txt")
+    out = outdir / name
+    src.write_text(text, encoding="utf-8")
+    err = ""
+    for attempt in range(1, 3):
+        r = subprocess.run([say, "-v", voice, "-f", str(src), "-o", str(out), "--file-format=m4af", "--data-format=aac"],
+                           capture_output=True, text=True, timeout=SAY_TIMEOUT)
+        if r.returncode == 0 and out.exists() and out.stat().st_size >= MIN_AUDIO:
+            break
+        err = (r.stderr or "").strip()[:200] or f"код {r.returncode}"
+        print(f"  повтор {name} ({voice}): {T.pub(err)}", flush=True)
+    else:
+        snippet = text[:60].replace("\n", " ")
+        raise RuntimeError(f"голос {voice} не записав фрагмент «{snippet}»: {err}")
+    src.unlink()
+    return out
+
+
+def mp3_one(src, mp3, ffmpeg):
+    """.m4a -> mp3 (24 кГц, 48 кбіт/с, моно, як у Edge)."""
+    r = subprocess.run([ffmpeg, "-y", "-loglevel", "error", "-i", str(src), "-ac", "1", "-ar", "24000",
+                        "-b:a", "48k", "-write_xing", "0", "-id3v2_version", "0", str(mp3)], capture_output=True, text=True)
+    if r.returncode != 0 or not Path(mp3).exists():
+        raise RuntimeError(f"не вдалося перетворити {Path(src).name} у mp3: {(r.stderr or '').strip()[:200]}")
+    return Path(mp3)
+
+
 def synth(epub, outdir, jobs=3, say="say", shard=0, shards=1):
     """Етап 1 (Mac): записує сегменти в outdir/*.m4a і план outdir/plan.json. Повертає план.
     shard/shards: при озвучці на кількох серверах кожен записує лише свою частку (план усе одно повний)."""
@@ -77,22 +108,8 @@ def synth(epub, outdir, jobs=3, say="say", shard=0, shards=1):
     started, done = time.time(), {"n": 0, "chars": 0}
 
     def one(task):
+        record(task, outdir, say)
         name, voice, text = task
-        src = outdir / (name + ".txt")
-        out = outdir / name
-        src.write_text(text, encoding="utf-8")
-        err = ""
-        for attempt in range(1, 3):
-            r = subprocess.run([say, "-v", voice, "-f", str(src), "-o", str(out), "--file-format=m4af", "--data-format=aac"],
-                               capture_output=True, text=True, timeout=SAY_TIMEOUT)
-            if r.returncode == 0 and out.exists() and out.stat().st_size >= MIN_AUDIO:
-                break
-            err = (r.stderr or "").strip()[:200] or f"код {r.returncode}"
-            print(f"  повтор {name} ({voice}): {T.pub(err)}", flush=True)
-        else:
-            snippet = text[:60].replace("\n", " ")
-            raise RuntimeError(f"голос {voice} не записав фрагмент «{snippet}»: {err}")
-        src.unlink()
         done["n"] += 1
         done["chars"] += len(text)
         if done["n"] % 10 == 0 or done["n"] == len(tasks):
@@ -145,12 +162,7 @@ def to_mp3(segdir, names, outdir, ffmpeg=None, jobs=4):
     ffmpeg = ffmpeg or find_ffmpeg()
 
     def conv(name):
-        mp3 = outdir / (name[:-4] + ".mp3")
-        r = subprocess.run([ffmpeg, "-y", "-loglevel", "error", "-i", str(segdir / name), "-ac", "1", "-ar", "24000",
-                            "-b:a", "48k", "-write_xing", "0", "-id3v2_version", "0", str(mp3)], capture_output=True, text=True)
-        if r.returncode != 0 or not mp3.exists():
-            raise RuntimeError(f"не вдалося перетворити {name} у mp3: {(r.stderr or '').strip()[:200]}")
-        return mp3
+        return mp3_one(segdir / name, outdir / (name[:-4] + ".mp3"), ffmpeg)
 
     print(f"Перетворюю {len(names)} фрагментів у mp3...", flush=True)
     started = time.time()

@@ -6,8 +6,9 @@
 Якщо EPUB лежить у нашому сховищі (R2_PUBLIC_BASE/in/...), після роботи його видаляють.
 Голос Apple (GENDER=apple) іде в два етапи (STAGE): apple-synth на macOS (запис у теку APPLE_DIR) і apple-pack на Linux
 (збірка книги з APPLE_DIR); вхідний EPUB видаляється лише після другого етапу або при помилці.
-Або на кількох серверах: apple-shard (SHARD із SHARDS; запис своєї частки, mp3, архів у тимчасову теку сховища tmp/...),
-потім apple-join на Linux (збірка книги з частин, публікація, прибирання tmp/); apple-cleanup прибирає tmp/ після збою.
+Або на кількох серверах: apple-shard (SHARD із SHARDS; по фрагменту say -> mp3 -> tmp/.../seg/ у сховищі; закінчивши свою
+частку, сервер забирає ще не взяті фрагменти повільніших, позначки own/ і steal/), потім apple-join на Linux (збірка
+книги, публікація, прибирання tmp/); apple-cleanup прибирає tmp/ і вхідний EPUB після збою.
 Голоси Edge так само можна розподілити: edge-shard (SHARD із SHARDS), edge-join, edge-cleanup."""
 import hashlib
 import hmac
@@ -225,31 +226,151 @@ def edge_join(epub, gender, cfg, url, work):
     return T.assemble(book, parts, epub, work / "out", workdir, book_id)
 
 
+APPLE_SAY = "say"        # у тестах підміняється заглушкою
+APPLE_FFMPEG = None      # None = imageio-ffmpeg або ffmpeg із системи
+
+
+def s3_exists(cfg, key):
+    return s3_request(cfg, "HEAD", key) == 200
+
+
+def seg_key(url, kind, name):
+    """Ключі розподіленої Apple-озвучки: seg/<фрагмент>.mp3 (готовий звук), own/<фрагмент> (взяв свій сервер),
+    steal/<фрагмент> (забрав інший сервер, що вже закінчив свою частку)."""
+    return f"{tmp_prefix(url)}/{kind}/{name}"
+
+
+def put_small(cfg, key, path):
+    for attempt in range(1, 4):
+        try:
+            T.s3_put(cfg, key, path, content_type="application/octet-stream")
+            return
+        except Exception as e:  # noqa: BLE001
+            if attempt == 3:
+                raise RuntimeError(f"не вдалося покласти фрагмент у сховище: {e}")
+            time.sleep(2 * attempt)
+
+
+def steal_order(lists, shard):
+    """Чужі фрагменти для «крадіжки»: з кінців черг інших серверів по черзі (їхні власники дійдуть туди найпізніше)."""
+    others = [l for s, l in enumerate(lists) if s != shard]
+    out = []
+    for k in range(max((len(l) for l in others), default=0)):
+        for l in others:
+            if k < len(l):
+                out.append(l[-1 - k])
+    return out
+
+
 def apple_shard(epub, apple_dir, cfg, url, work):
-    """Сервер SHARD із SHARDS: записує свою частку голосом Apple, перетворює в mp3 і кладе архів у тимчасову теку сховища."""
+    """Сервер SHARD із SHARDS: спершу записує свою частку (по фрагменту: say -> mp3 -> сховище), потім забирає
+    ще не взяті фрагменти з кінців черг повільніших серверів. Домовленість через позначки own/ і steal/ у сховищі
+    (без бази); рідкісний подвійний запис одного фрагмента нешкідливий."""
+    import threading
+    from concurrent.futures import ThreadPoolExecutor
     shard, shards = shards_from_env()
-    A.synth(epub, apple_dir, jobs=int(os.environ.get("APPLE_JOBS", "3")), shard=shard, shards=shards)
-    names = [t[0] for t in A.shard_tasks(A.build_plan(epub)[1], shard, shards)]
-    mp3s = A.to_mp3(apple_dir, names, work / "mp3", jobs=int(os.environ.get("APPLE_JOBS", "4")))
-    part = work / f"apple-{shard}.zip"
-    with zipfile.ZipFile(part, "w", zipfile.ZIP_STORED) as z:
-        z.write(Path(apple_dir) / "plan.json", "plan.json")
-        for m in mp3s.values():
-            z.write(m, m.name)
-    put_part(cfg, url, "apple", shard, shards, part)
+    plan, tasks = A.build_plan(epub)
+    lists = [A.shard_tasks(tasks, s, shards) for s in range(shards)]
+    order = [(t, True) for t in lists[shard]] + [(t, False) for t in steal_order(lists, shard)]
+    apple_dir, mp3dir = Path(apple_dir), work / "mp3"
+    apple_dir.mkdir(parents=True, exist_ok=True)
+    mp3dir.mkdir(parents=True, exist_ok=True)
+    marker = work / "marker"
+    marker.write_bytes(b"1")
+    ffmpeg = APPLE_FFMPEG or A.find_ffmpeg()
+    jobs = max(1, int(os.environ.get("APPLE_JOBS", "4")))
+    lock, pos, stop = threading.Lock(), [0], []
+    st = {"own": 0, "stolen": 0, "skipped": 0}
+    print(f"«{T.pub(plan['title'])}»: {len(tasks)} сегментів, сервер {shard + 1} з {shards}: своїх {len(lists[shard])}, "
+          f"паралельно {jobs}", flush=True)
+    started = time.time()
+
+    def take():
+        with lock:
+            if stop or pos[0] >= len(order):
+                return None
+            pos[0] += 1
+            return order[pos[0] - 1]
+
+    def worker():
+        try:
+            while True:
+                it = take()
+                if not it:
+                    return
+                (name, voice, text), mine = it
+                mp3name = name[:-4] + ".mp3"
+                if s3_exists(cfg, seg_key(url, "seg", mp3name)) or s3_exists(cfg, seg_key(url, "steal", name)) \
+                        or (not mine and s3_exists(cfg, seg_key(url, "own", name))):
+                    with lock:
+                        st["skipped"] += 1
+                    continue
+                put_small(cfg, seg_key(url, "own" if mine else "steal", name), marker)
+                m4a = A.record((name, voice, text), apple_dir, APPLE_SAY)
+                mp3 = A.mp3_one(m4a, mp3dir / mp3name, ffmpeg)
+                put_small(cfg, seg_key(url, "seg", mp3name), mp3)
+                m4a.unlink()
+                mp3.unlink()
+                with lock:
+                    st["own" if mine else "stolen"] += 1
+                    n = st["own"] + st["stolen"]
+                    if n % 10 == 0:
+                        print(f"  готово {n} (своїх {st['own']}/{len(lists[shard])}, забрано в інших {st['stolen']}), "
+                              f"минуло {int(time.time() - started)} с", flush=True)
+        except BaseException:
+            stop.append(1)
+            raise
+
+    with ThreadPoolExecutor(jobs) as ex:
+        futs = [ex.submit(worker) for _ in range(jobs)]
+    for f in futs:
+        f.result()
+    print(f"Сервер {shard + 1}: своїх {st['own']}, забрано в інших {st['stolen']}, пропущено (зробив інший) {st['skipped']}, "
+          f"за {int(time.time() - started)} с", flush=True)
 
 
 def apple_join(epub, cfg, url, work):
-    """Linux: забирає частини з усіх серверів, збирає книгу. Повертає шлях до zip."""
-    _, shards = shards_from_env()
+    """Linux: забирає готові mp3 усіх фрагментів зі сховища й збирає книгу. Повертає шлях до zip."""
+    from concurrent.futures import ThreadPoolExecutor
+    plan, tasks = A.build_plan(epub)
     got = work / "join"
-    get_parts(cfg, url, "apple", shards, got, work)
-    plan = json.loads((got / "plan.json").read_text(encoding="utf-8"))
-    mp3s = {n: got / (n[:-4] + ".mp3") for p in plan["parts"] for n in p["files"] if (got / (n[:-4] + ".mp3")).exists()}
+    got.mkdir(parents=True, exist_ok=True)
+    started = time.time()
+
+    def fetch(t):
+        mp3name = t[0][:-4] + ".mp3"
+        code = s3_request(cfg, "GET", seg_key(url, "seg", mp3name), dest=got / mp3name)
+        if code != 200:
+            raise RuntimeError(f"фрагмент {mp3name} не знайдено в сховищі (код {code})")
+        return t[0], got / mp3name
+
+    with ThreadPoolExecutor(8) as ex:
+        mp3s = dict(ex.map(fetch, tasks))
+    print(f"Фрагменти ({len(mp3s)}) забрано за {int(time.time() - started)} с", flush=True)
     book, book_id = T.read_epub(epub), A.book_id_of(epub)
     workdir = T.work_root() / ("apple_" + book_id)
     workdir.mkdir(parents=True, exist_ok=True)
     return A.assemble(plan, mp3s, book, epub, work / "out", workdir, book_id)
+
+
+def apple_seg_cleanup(cfg, url, epub):
+    """Прибирає позначки й фрагменти розподіленої Apple-озвучки (імена беруться з плану книги). Ніколи не падає."""
+    from concurrent.futures import ThreadPoolExecutor
+    try:
+        _, tasks = A.build_plan(epub)
+    except Exception as e:  # noqa: BLE001
+        print(f"План книги не прочитано, тимчасові файли прибере правило сховища: {type(e).__name__}")
+        return
+    keys = [seg_key(url, k, n) for t in tasks for k, n in (("seg", t[0][:-4] + ".mp3"), ("own", t[0]), ("steal", t[0]))]
+
+    def rm(k):
+        try:
+            return s3_delete(cfg, k)
+        except Exception:  # noqa: BLE001
+            return False
+    with ThreadPoolExecutor(8) as ex:
+        n = sum(ex.map(rm, keys))
+    print(f"Тимчасові файли прибрано: {n}", flush=True)
 
 
 def apple_cleanup(cfg, url, kind="apple"):
@@ -311,8 +432,10 @@ def run(url, gender, jobs, cfg, nc, job, stage=""):
     link = T.publish(zip_path, cfg=cfg, nc=nc, clipboard=False)
     if not link:
         raise SystemExit("Книгу озвучено, але завантажити в сховище не вдалося")
-    if stage in ("apple-join", "edge-join"):
-        apple_cleanup(cfg, url, stage.split("-")[0])
+    if stage == "apple-join":
+        apple_seg_cleanup(cfg, url, epub)
+    elif stage == "edge-join":
+        apple_cleanup(cfg, url, "edge")
     print("Готово.")
 
 
@@ -338,8 +461,22 @@ def main():
         jobs = 12
     job = os.environ.get("JOB_ID", "").strip() or None
     cfg = storage_from_env()
-    if stage in ("apple-cleanup", "edge-cleanup"):          # після збою: лише прибрати тимчасові частини
-        apple_cleanup(cfg, url, stage.split("-")[0])
+    if stage == "edge-cleanup":          # після збою: лише прибрати тимчасові частини
+        apple_cleanup(cfg, url, "edge")
+        return
+    if stage == "apple-cleanup":         # після збою: прибрати фрагменти й позначки, потім вхідний EPUB
+        work = Path(tempfile.mkdtemp(prefix="cloud_job_"))
+        try:
+            download(url, work / "book.epub")
+            apple_seg_cleanup(cfg, url, work / "book.epub")
+        except BaseException as e:  # noqa: BLE001
+            print(f"EPUB для прибирання недоступний ({type(e).__name__}); тимчасові файли прибере правило сховища")
+        key = input_key(cfg, url)
+        if key:
+            try:
+                s3_delete(cfg, key)
+            except Exception:  # noqa: BLE001
+                pass
         return
     nc = notify_from_env()
     if stage not in ("apple-pack", "apple-join", "edge-join"):
@@ -350,7 +487,7 @@ def main():
     except BaseException as e:  # noqa: BLE001  (SystemExit теж: текст причини показуємо в читалці)
         msg = str(e) if isinstance(e, SystemExit) else f"{type(e).__name__}: {e}"
         job_update(nc, job, "failed", msg[:300])
-        keep_input = False
+        keep_input = stage == "apple-shard"   # EPUB потрібен кроку прибирання (він його й видалить)
         if os.environ.get("GITHUB_ACTIONS") == "true":   # журнал публічний: причина (з назвою або уривком) лише в читалці
             print(f"Озвучка перервалась ({type(e).__name__}); подробиці в читалці")
             raise SystemExit(1) from None
