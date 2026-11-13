@@ -32,10 +32,8 @@ def segments(part, limit=SEG_CHARS):
     return out
 
 
-def synth(epub, outdir, jobs=3, say="say"):
-    """Етап 1 (Mac): записує сегменти в outdir/*.m4a і план outdir/plan.json. Повертає план."""
-    outdir = Path(outdir)
-    outdir.mkdir(parents=True, exist_ok=True)
+def build_plan(epub):
+    """План книги й список сегментів [(файл, голос, текст)]. Однаковий на кожному сервері (визначається лише EPUB)."""
     book = T.read_epub(epub)
     if not book["chapters"]:
         raise RuntimeError("У книзі не знайдено тексту (можливо, файл захищений DRM)")
@@ -50,8 +48,32 @@ def synth(epub, outdir, jobs=3, say="say"):
             texts.append(text)
             tasks.append((name, APPLE_VOICES[lang], text))
         plan["parts"].append({"title": p["title"], "files": files, "texts": texts})
+    return plan, tasks
+
+
+def shard_tasks(tasks, shard=0, shards=1):
+    """Частка сегментів для сервера shard із shards: суцільний відрізок, рівний за кількістю символів."""
+    if shards <= 1:
+        return list(tasks)
+    total = sum(len(t[2]) for t in tasks) or 1
+    out, before = [], 0
+    for t in tasks:
+        if min(shards - 1, before * shards // total) == shard:
+            out.append(t)
+        before += len(t[2])
+    return out
+
+
+def synth(epub, outdir, jobs=3, say="say", shard=0, shards=1):
+    """Етап 1 (Mac): записує сегменти в outdir/*.m4a і план outdir/plan.json. Повертає план.
+    shard/shards: при озвучці на кількох серверах кожен записує лише свою частку (план усе одно повний)."""
+    outdir = Path(outdir)
+    outdir.mkdir(parents=True, exist_ok=True)
+    plan, all_tasks = build_plan(epub)
+    tasks = shard_tasks(all_tasks, shard, shards)
     chars = sum(len(t[2]) for t in tasks)
-    print(f"«{T.pub(book['title'])}»: {len(parts)} частин, {len(tasks)} сегментів, {chars} символів, паралельно {jobs}", flush=True)
+    where = f", сервер {shard + 1} з {shards}: {len(tasks)} сегментів" if shards > 1 else ""
+    print(f"«{T.pub(plan['title'])}»: {len(plan['parts'])} частин, {len(all_tasks)} сегментів{where}, {chars} символів, паралельно {jobs}", flush=True)
     started, done = time.time(), {"n": 0, "chars": 0}
 
     def one(task):
@@ -92,13 +114,19 @@ def find_ffmpeg():
         return "ffmpeg"
 
 
+def book_id_of(epub):
+    """Той самий id, що й у T.convert: однаковий на всіх серверах (прогрес у плеєрі не губиться)."""
+    epub = Path(epub)
+    return hashlib.sha1(f"{epub.stem}{epub.stat().st_size}".encode()).hexdigest()[:10]
+
+
 def pack(segdir, epub, out_dir, ffmpeg=None, jobs=4):
     """Етап 2 (Linux): з сегментів і плану збирає .audiobook.zip. Повертає шлях до zip."""
     segdir, epub, out_dir = Path(segdir), Path(epub), Path(out_dir)
     plan = json.loads((segdir / "plan.json").read_text(encoding="utf-8"))
     ffmpeg = ffmpeg or find_ffmpeg()
     book = T.read_epub(epub)                 # обкладинка, назва, автор
-    book_id = hashlib.sha1(f"{epub.stem}{epub.stat().st_size}".encode()).hexdigest()[:10]   # як у T.convert
+    book_id = book_id_of(epub)
     workdir = T.work_root() / ("apple_" + book_id)
     workdir.mkdir(parents=True, exist_ok=True)
     names = [f for p in plan["parts"] for f in p["files"]]
@@ -106,8 +134,18 @@ def pack(segdir, epub, out_dir, ffmpeg=None, jobs=4):
     if missing:
         raise RuntimeError(f"бракує {len(missing)} записаних фрагментів (перший: {missing[0]})")
 
+    mp3s = to_mp3(segdir, names, workdir, ffmpeg, jobs)
+    return assemble(plan, mp3s, book, epub, out_dir, workdir, book_id)
+
+
+def to_mp3(segdir, names, outdir, ffmpeg=None, jobs=4):
+    """Перетворює записані .m4a у mp3 (як у Edge: 24 кГц, 48 кбіт/с, моно). Повертає {ім'я .m4a: шлях .mp3}."""
+    segdir, outdir = Path(segdir), Path(outdir)
+    outdir.mkdir(parents=True, exist_ok=True)
+    ffmpeg = ffmpeg or find_ffmpeg()
+
     def conv(name):
-        mp3 = workdir / (name[:-4] + ".mp3")
+        mp3 = outdir / (name[:-4] + ".mp3")
         r = subprocess.run([ffmpeg, "-y", "-loglevel", "error", "-i", str(segdir / name), "-ac", "1", "-ar", "24000",
                             "-b:a", "48k", "-write_xing", "0", "-id3v2_version", "0", str(mp3)], capture_output=True, text=True)
         if r.returncode != 0 or not mp3.exists():
@@ -115,8 +153,18 @@ def pack(segdir, epub, out_dir, ffmpeg=None, jobs=4):
         return mp3
 
     print(f"Перетворюю {len(names)} фрагментів у mp3...", flush=True)
+    started = time.time()
     with ThreadPoolExecutor(max(1, jobs)) as ex:
-        mp3s = dict(zip(names, ex.map(conv, names)))
+        out = dict(zip(names, ex.map(conv, names)))
+    print(f"Перетворено за {int(time.time() - started)} с", flush=True)
+    return out
+
+
+def assemble(plan, mp3s, book, epub, out_dir, workdir, book_id):
+    """Збирає .audiobook.zip з уже перетворених mp3 за планом."""
+    missing = [f for p in plan["parts"] for f in p["files"] if f not in mp3s]
+    if missing:
+        raise RuntimeError(f"бракує {len(missing)} записаних фрагментів (перший: {missing[0]})")
     parts = [{"title": p["title"], "chunks": [{"path": mp3s[f], "text": (p.get("texts") or [""] * len(p["files"]))[k]}
                                               for k, f in enumerate(p["files"])]} for p in plan["parts"]]
     return T.assemble(book, parts, epub, out_dir, workdir, book_id)

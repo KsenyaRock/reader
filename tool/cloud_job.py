@@ -5,7 +5,9 @@
         SUPABASE_URL, SUPABASE_ANON_KEY, READER_UPLOAD_KEY (останні три необов'язкові), JOB_ID (задача з читалки, необов'язково).
 Якщо EPUB лежить у нашому сховищі (R2_PUBLIC_BASE/in/...), після роботи його видаляють.
 Голос Apple (GENDER=apple) іде в два етапи (STAGE): apple-synth на macOS (запис у теку APPLE_DIR) і apple-pack на Linux
-(збірка книги з APPLE_DIR); вхідний EPUB видаляється лише після другого етапу або при помилці."""
+(збірка книги з APPLE_DIR); вхідний EPUB видаляється лише після другого етапу або при помилці.
+Або на кількох серверах: apple-shard (SHARD із SHARDS; запис своєї частки, mp3, архів у тимчасову теку сховища tmp/...),
+потім apple-join на Linux (збірка книги з частин, публікація, прибирання tmp/); apple-cleanup прибирає tmp/ після збою."""
 import hashlib
 import hmac
 import http.client
@@ -17,6 +19,7 @@ import time
 import urllib.parse
 import urllib.error
 import urllib.request
+import zipfile
 from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -88,8 +91,8 @@ def job_title(nc, job, title):
         print(f"Не вдалося оновити назву задачі: {e}")
 
 
-def s3_delete(cfg, key):
-    """Видаляє об'єкт із бакета (підпис AWS SigV4, порожнє тіло)."""
+def s3_request(cfg, method, key, dest=None):
+    """Підписаний запит без тіла до бакета (AWS SigV4): DELETE або GET (тоді відповідь пишеться у файл dest). Повертає код."""
     u = urllib.parse.urlparse(cfg["endpoint"])
     host, region = u.netloc, cfg.get("region") or "auto"
     uri = "/" + urllib.parse.quote(f"{cfg['bucket']}/{key}")
@@ -98,7 +101,7 @@ def s3_delete(cfg, key):
     empty = hashlib.sha256(b"").hexdigest()
     headers = {"host": host, "x-amz-content-sha256": empty, "x-amz-date": amz_date}
     names = sorted(headers)
-    canonical = "DELETE\n" + uri + "\n\n" + "".join(f"{n}:{headers[n]}\n" for n in names) + "\n" + ";".join(names) + "\n" + empty
+    canonical = method + "\n" + uri + "\n\n" + "".join(f"{n}:{headers[n]}\n" for n in names) + "\n" + ";".join(names) + "\n" + empty
     scope = f"{day}/{region}/s3/aws4_request"
     to_sign = "AWS4-HMAC-SHA256\n" + amz_date + "\n" + scope + "\n" + hashlib.sha256(canonical.encode()).hexdigest()
     k = T._sign(("AWS4" + cfg["secret"]).encode(), day)
@@ -106,17 +109,101 @@ def s3_delete(cfg, key):
         k = T._sign(k, part)
     sig = hmac.new(k, to_sign.encode(), hashlib.sha256).hexdigest()
     headers["authorization"] = f"AWS4-HMAC-SHA256 Credential={cfg['key_id']}/{scope}, SignedHeaders={';'.join(names)}, Signature={sig}"
-    conn = (http.client.HTTPSConnection if u.scheme == "https" else http.client.HTTPConnection)(host, timeout=60)
+    conn = (http.client.HTTPSConnection if u.scheme == "https" else http.client.HTTPConnection)(host, timeout=120)
     try:
-        conn.putrequest("DELETE", uri, skip_host=True, skip_accept_encoding=True)
+        conn.putrequest(method, uri, skip_host=True, skip_accept_encoding=True)
         for n, v in headers.items():
             conn.putheader(n, v)
         conn.endheaders()
         resp = conn.getresponse()
-        resp.read()
-        return resp.status in (200, 204)
+        if dest is not None and resp.status == 200:
+            with open(dest, "wb") as out:
+                for block in iter(lambda: resp.read(1 << 20), b""):
+                    out.write(block)
+        else:
+            resp.read()
+        return resp.status
     finally:
         conn.close()
+
+
+def s3_delete(cfg, key):
+    """Видаляє об'єкт із бакета (підпис AWS SigV4, порожнє тіло)."""
+    return s3_request(cfg, "DELETE", key) in (200, 204)
+
+
+def tmp_prefix(url):
+    """Тимчасова тека в сховищі для частин однієї озвучки на кількох серверах. Обчислюється з посилання на EPUB
+    (у ньому випадковий код), тому однакова на всіх серверах і не вгадується з публічного журналу."""
+    return "tmp/" + hashlib.sha256(url.encode("utf-8")).hexdigest()[:32]
+
+
+def shards_from_env(env=os.environ):
+    try:
+        shards = max(1, min(20, int(env.get("SHARDS", "1"))))
+        shard = int(env.get("SHARD", "0"))
+    except ValueError:
+        raise SystemExit("SHARD і SHARDS мають бути числами")
+    if not 0 <= shard < shards:
+        raise SystemExit("SHARD має бути від 0 до SHARDS-1")
+    return shard, shards
+
+
+def apple_shard(epub, apple_dir, cfg, url, work):
+    """Сервер SHARD із SHARDS: записує свою частку голосом Apple, перетворює в mp3 і кладе архів у тимчасову теку сховища."""
+    shard, shards = shards_from_env()
+    A.synth(epub, apple_dir, jobs=int(os.environ.get("APPLE_JOBS", "3")), shard=shard, shards=shards)
+    names = [t[0] for t in A.shard_tasks(A.build_plan(epub)[1], shard, shards)]
+    mp3s = A.to_mp3(apple_dir, names, work / "mp3", jobs=int(os.environ.get("APPLE_JOBS", "4")))
+    part = work / f"apple-{shard}.zip"
+    with zipfile.ZipFile(part, "w", zipfile.ZIP_STORED) as z:
+        z.write(Path(apple_dir) / "plan.json", "plan.json")
+        for m in mp3s.values():
+            z.write(m, m.name)
+    for attempt in range(1, 4):
+        try:
+            T.s3_put(cfg, f"{tmp_prefix(url)}/apple-{shard}.zip", part)
+            break
+        except Exception as e:  # noqa: BLE001
+            if attempt == 3:
+                raise RuntimeError(f"частину {shard + 1} не вдалося покласти в сховище: {e}")
+            time.sleep(3 * attempt)
+    print(f"Частину {shard + 1} з {shards} покладено в сховище ({part.stat().st_size // 1048576} МБ)", flush=True)
+
+
+def apple_join(epub, cfg, url, work):
+    """Linux: забирає частини з усіх серверів, збирає книгу. Повертає шлях до zip."""
+    _, shards = shards_from_env()
+    got = work / "join"
+    got.mkdir(parents=True, exist_ok=True)
+    started = time.time()
+    for i in range(shards):
+        f = work / f"apple-{i}.zip"
+        st = s3_request(cfg, "GET", f"{tmp_prefix(url)}/apple-{i}.zip", dest=f)
+        if st != 200:
+            raise RuntimeError(f"частина {i + 1} з {shards} не знайдена в сховищі (код {st})")
+        with zipfile.ZipFile(f) as z:
+            z.extractall(got)
+        f.unlink()
+    print(f"Частини забрано за {int(time.time() - started)} с", flush=True)
+    plan = json.loads((got / "plan.json").read_text(encoding="utf-8"))
+    mp3s = {n: got / (n[:-4] + ".mp3") for p in plan["parts"] for n in p["files"] if (got / (n[:-4] + ".mp3")).exists()}
+    book, book_id = T.read_epub(epub), A.book_id_of(epub)
+    workdir = T.work_root() / ("apple_" + book_id)
+    workdir.mkdir(parents=True, exist_ok=True)
+    return A.assemble(plan, mp3s, book, epub, work / "out", workdir, book_id)
+
+
+def apple_cleanup(cfg, url):
+    """Прибирає тимчасові частини озвучки зі сховища (після збірки або збою). Ніколи не падає."""
+    _, shards = shards_from_env()
+    n = 0
+    for i in range(shards):
+        try:
+            n += s3_delete(cfg, f"{tmp_prefix(url)}/apple-{i}.zip")
+        except Exception:  # noqa: BLE001
+            pass
+    print(f"Тимчасові частини прибрано: {n}", flush=True)
 
 
 def input_key(cfg, url):
@@ -137,7 +224,10 @@ def run(url, gender, jobs, cfg, nc, job, stage=""):
     epub = work / name
     download(url, epub)
     apple_dir = Path(os.environ.get("APPLE_DIR", "apple-parts"))
-    if stage == "apple-pack":
+    if stage == "apple-join":
+        print("Збираю книгу з частин, записаних на кількох серверах")
+        zip_path = apple_join(epub, cfg, url, work)
+    elif stage == "apple-pack":
         print("Збираю книгу з записаного голосу Apple")
         zip_path = A.pack(apple_dir, epub, work / "out")
     else:
@@ -148,13 +238,21 @@ def run(url, gender, jobs, cfg, nc, job, stage=""):
         if stage == "apple-synth":
             A.synth(epub, apple_dir, jobs=int(os.environ.get("APPLE_JOBS", "3")))
             return
+        if stage == "apple-shard":
+            apple_shard(epub, apple_dir, cfg, url, work)
+            return
         out = work / "out"
         print(f"Озвучую: голос {'чоловічий' if gender == 'male' else 'жіночий'}, паралельних запитів {jobs}")
         zip_path = T.convert(epub, out, gender, "+0%", jobs)
     link = T.publish(zip_path, cfg=cfg, nc=nc, clipboard=False)
     if not link:
         raise SystemExit("Книгу озвучено, але завантажити в сховище не вдалося")
+    if stage == "apple-join":
+        apple_cleanup(cfg, url)
     print("Готово.")
+
+
+APPLE_STAGES = ("apple-synth", "apple-pack", "apple-shard", "apple-join", "apple-cleanup")
 
 
 def main():
@@ -164,18 +262,22 @@ def main():
     g = os.environ.get("GENDER", "female").lower()
     gender = g if g in ("male", "apple") else "female"
     stage = os.environ.get("STAGE", "").strip()
-    if (gender == "apple") != (stage in ("apple-synth", "apple-pack")):
-        raise SystemExit("Голос Apple озвучується в два етапи: STAGE=apple-synth (macOS), потім STAGE=apple-pack")
+    if (gender == "apple") != (stage in APPLE_STAGES):
+        raise SystemExit("Голос Apple озвучується етапами: STAGE=apple-synth (macOS), потім STAGE=apple-pack; "
+                         "або на кількох серверах: STAGE=apple-shard (SHARD, SHARDS), потім STAGE=apple-join")
     try:
         jobs = max(1, min(20, int(os.environ.get("JOBS", "12"))))
     except ValueError:
         jobs = 12
     job = os.environ.get("JOB_ID", "").strip() or None
     cfg = storage_from_env()
+    if stage == "apple-cleanup":          # після збою: лише прибрати тимчасові частини
+        apple_cleanup(cfg, url)
+        return
     nc = notify_from_env()
-    if stage != "apple-pack":
+    if stage not in ("apple-pack", "apple-join"):
         job_update(nc, job, "running")
-    keep_input = stage == "apple-synth"   # EPUB ще потрібен другому етапу
+    keep_input = stage in ("apple-synth", "apple-shard")   # EPUB ще потрібен наступному етапу
     try:
         run(url, gender, jobs, cfg, nc, job, stage)
     except BaseException as e:  # noqa: BLE001  (SystemExit теж: текст причини показуємо в читалці)
@@ -187,7 +289,7 @@ def main():
             raise SystemExit(1) from None
         raise
     else:
-        if stage != "apple-synth":
+        if stage not in ("apple-synth", "apple-shard"):
             job_update(nc, job, "done")
     finally:
         key = None if keep_input else input_key(cfg, url)

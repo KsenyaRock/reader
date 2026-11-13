@@ -1,6 +1,6 @@
 name: voice
 # Хмарна озвучка: EPUB за посиланням -> озвучка Edge TTS -> книга в Cloudflare R2 -> повідомлення в Telegram.
-# Голос Apple (gender=apple): job apple на Intel-Mac (запис say + збірка книги, без артефактів).
+# Голос Apple (gender=apple): 5 Intel-Mac паралельно (apple) -> збірка на Linux (apple-join) -> apple-failed при збої.
 # Запуск вручну: Actions -> voice -> Run workflow. Секрети (Settings -> Secrets and variables -> Actions): R2_ENDPOINT, R2_BUCKET,
 # R2_KEY_ID, R2_SECRET, R2_PUBLIC_BASE, SUPABASE_URL, SUPABASE_ANON_KEY, READER_UPLOAD_KEY.
 on:
@@ -70,18 +70,22 @@ jobs:
             -H "Content-Type: application/json" -H "apikey: $SUPABASE_ANON_KEY" -H "Authorization: Bearer $SUPABASE_ANON_KEY" \
             -d "{\"k\":\"$READER_UPLOAD_KEY\",\"p_job\":$JOB_ID,\"p_status\":\"failed\",\"p_err\":\"Озвучка перервалась (див. журнал запуску на GitHub)\"}" || true
 
-  # Голос Apple (з 13.11.2026): один job на Intel-Mac у ПУБЛІЧНОМУ репозиторії (стандартні раннери тут безкоштовні,
-  # а Intel-Mac на відміну від Apple Silicon стартують одразу). Запис і збірка книги на тому ж сервері,
-  # без артефактів GitHub (їх у публічному репозиторії може завантажити будь-хто): готова книга одразу йде в R2.
+  # Голос Apple (з 13.11.2026): ПУБЛІЧНИЙ репозиторій (стандартні раннери безкоштовні), Intel-Mac (стартують одразу,
+  # на відміну від Apple Silicon). Книга ділиться на 5 серверів (ліміт Mac на акаунт): кожен пише свою частку,
+  # перетворює в mp3 і кладе архів у тимчасову теку сховища (tmp/..., не артефакти GitHub: їх у публічному
+  # репозиторії може завантажити будь-хто); apple-join на Linux збирає книгу, публікує й прибирає tmp/.
   apple:
     if: github.event_name == 'workflow_dispatch' && inputs.gender == 'apple'
+    strategy:
+      fail-fast: true
+      matrix:
+        shard: [0, 1, 2, 3, 4]
     runs-on: macos-26-intel
-    timeout-minutes: 300
+    timeout-minutes: 120
     env:
       EPUB_URL: ${{ inputs.epub_url }}
       GENDER: apple
-      APPLE_DIR: apple-parts
-      APPLE_JOBS: '4'
+      SHARDS: '5'
       JOB_ID: ${{ inputs.job_id }}
       R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
       R2_BUCKET: ${{ secrets.R2_BUCKET }}
@@ -91,6 +95,10 @@ jobs:
       SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
       SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
       READER_UPLOAD_KEY: ${{ secrets.READER_UPLOAD_KEY }}
+      SHARD: ${{ matrix.shard }}
+      STAGE: apple-shard
+      APPLE_DIR: apple-parts
+      APPLE_JOBS: '4'
     steps:
       - name: Сховати посилання на EPUB у журналі (репозиторій публічний)
         run: |
@@ -100,14 +108,70 @@ jobs:
       - uses: actions/setup-python@v5
         with: { python-version: '3.12' }
       - run: pip install mutagen imageio-ffmpeg
-      - name: Запис голосом Apple (Леся, Мілена, Samantha)
-        env: { STAGE: apple-synth }
+      - name: Запис голосом Apple (Леся, Мілена, Samantha) і mp3, частина ${{ matrix.shard }}
         run: python3 tool/cloud_job.py
-      - name: Збірка книги і завантаження
-        env: { STAGE: apple-pack }
+
+  apple-join:
+    needs: apple
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      EPUB_URL: ${{ inputs.epub_url }}
+      GENDER: apple
+      SHARDS: '5'
+      JOB_ID: ${{ inputs.job_id }}
+      R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
+      R2_BUCKET: ${{ secrets.R2_BUCKET }}
+      R2_KEY_ID: ${{ secrets.R2_KEY_ID }}
+      R2_SECRET: ${{ secrets.R2_SECRET }}
+      R2_PUBLIC_BASE: ${{ secrets.R2_PUBLIC_BASE }}
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+      READER_UPLOAD_KEY: ${{ secrets.READER_UPLOAD_KEY }}
+      STAGE: apple-join
+    steps:
+      - name: Сховати посилання на EPUB у журналі (репозиторій публічний)
+        run: |
+          echo "::add-mask::$EPUB_URL"
+          for t in $(echo "$EPUB_URL" | grep -oE '[a-f0-9]{32}'); do echo "::add-mask::$t"; done
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.12' }
+      - run: pip install mutagen
+      - name: Збірка книги з частин і завантаження
         run: python3 tool/cloud_job.py
+
+  apple-failed:
+    needs: [apple, apple-join]
+    if: ${{ always() && inputs.gender == 'apple' && (contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled')) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      EPUB_URL: ${{ inputs.epub_url }}
+      GENDER: apple
+      SHARDS: '5'
+      JOB_ID: ${{ inputs.job_id }}
+      R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
+      R2_BUCKET: ${{ secrets.R2_BUCKET }}
+      R2_KEY_ID: ${{ secrets.R2_KEY_ID }}
+      R2_SECRET: ${{ secrets.R2_SECRET }}
+      R2_PUBLIC_BASE: ${{ secrets.R2_PUBLIC_BASE }}
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+      READER_UPLOAD_KEY: ${{ secrets.READER_UPLOAD_KEY }}
+      STAGE: apple-cleanup
+    steps:
+      - name: Сховати посилання на EPUB у журналі (репозиторій публічний)
+        run: |
+          echo "::add-mask::$EPUB_URL"
+          for t in $(echo "$EPUB_URL" | grep -oE '[a-f0-9]{32}'); do echo "::add-mask::$t"; done
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.12' }
+      - name: Прибрати тимчасові частини зі сховища
+        run: python3 tool/cloud_job.py || true
       - name: Позначити задачу як невдалу (збій, скасування або перевищення часу)
-        if: ${{ (failure() || cancelled()) && inputs.job_id != '' }}
+        if: ${{ inputs.job_id != '' }}
         run: |
           curl -sS -m 30 -X POST "$SUPABASE_URL/rest/v1/rpc/reader_job_update" \
             -H "Content-Type: application/json" -H "apikey: $SUPABASE_ANON_KEY" -H "Authorization: Bearer $SUPABASE_ANON_KEY" \

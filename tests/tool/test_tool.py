@@ -791,17 +791,22 @@ class CloudJob(unittest.TestCase):
         self.cj = cloud_job
         prev = os.environ.pop("GITHUB_ACTIONS", None)      # тести не залежать від того, де вони запущені (у GitHub ця змінна є завжди)
         self.addCleanup(lambda: os.environ.__setitem__("GITHUB_ACTIONS", prev) if prev is not None else os.environ.pop("GITHUB_ACTIONS", None))
-        got = self.got = {"put": 0, "rpc": [], "rpc_names": [], "delete": []}
+        got = self.got = {"put": 0, "rpc": [], "rpc_names": [], "delete": [], "objects": {}, "put_paths": []}
 
         class H(http.server.BaseHTTPRequestHandler):
             def log_message(self, *a, **k): pass
             def _b(self):
                 return self.rfile.read(int(self.headers.get("Content-Length", 0)))
             def do_PUT(self):
-                self._b(); got["put"] += 1
+                got["objects"][self.path] = self._b(); got["put"] += 1; got["put_paths"].append(self.path)
                 self.send_response(200); self.send_header("Content-Length", "0"); self.end_headers()
+            def do_GET(self):
+                body = got["objects"].get(self.path)
+                if body is None or "Credential=" not in self.headers.get("authorization", ""):
+                    self.send_response(404); self.send_header("Content-Length", "0"); self.end_headers(); return
+                self.send_response(200); self.send_header("Content-Length", str(len(body))); self.end_headers(); self.wfile.write(body)
             def do_DELETE(self):
-                got["delete"].append(self.path)
+                got["delete"].append(self.path); got["objects"].pop(self.path, None)
                 self.send_response(204); self.send_header("Content-Length", "0"); self.end_headers()
             def do_POST(self):
                 got["rpc"].append(json.loads(self._b())); got["rpc_names"].append(self.path.rsplit("/", 1)[1])
@@ -916,6 +921,66 @@ class CloudJob(unittest.TestCase):
         self.assertEqual(self.got["rpc_names"][2:], ["reader_book_ready", "reader_job_update"])
         self.assertEqual(self.got["rpc"][-1]["p_status"], "done")
         self.assertEqual(len(self.got["delete"]), 1, "після збірки вхідний EPUB видалено")
+
+    def _apple_sharded(self, shards, fail_join_part=None):
+        import shutil, unittest.mock as mock
+        import apple_voice
+        url = "https://files.example/b/in/tok/book.epub"
+        keys = ("GENDER", "APPLE_DIR", "JOB_ID", "STAGE", "SHARD", "SHARDS", "APPLE_JOBS")
+        self.addCleanup(lambda: [os.environ.pop(k, None) for k in keys])
+        os.environ.update({"GENDER": "apple", "JOB_ID": "9", "EPUB_URL": url, "SHARDS": str(shards), "APPLE_JOBS": "2"})
+        real_synth, real_mp3 = apple_voice.synth, apple_voice.to_mp3
+        with mock.patch.object(self.cj, "download", lambda u, dest: shutil.copy(self.epub, dest)), \
+             mock.patch.object(apple_voice, "synth", lambda e, d, jobs=3, shard=0, shards=1: real_synth(e, d, jobs, say=FAKE_SAY, shard=shard, shards=shards)), \
+             mock.patch.object(apple_voice, "to_mp3", lambda sd, names, od, ffmpeg=None, jobs=4: real_mp3(sd, names, od, ffmpeg=FAKE_FFMPEG, jobs=jobs)):
+            for i in range(shards):        # кожен сервер окремо, зі своєю текою
+                os.environ.update({"STAGE": "apple-shard", "SHARD": str(i), "APPLE_DIR": os.path.join(self.dir, f"srv{i}")})
+                with redirect_stdout(io.StringIO()):
+                    self.cj.main()
+            if fail_join_part is not None:
+                self.got["objects"].pop(f"/b/{self.cj.tmp_prefix(url)}/apple-{fail_join_part}.zip")
+            os.environ["STAGE"] = "apple-join"
+            with redirect_stdout(io.StringIO()):
+                self.cj.main()
+        return url
+
+    def test_apple_sharded_builds_same_book(self):
+        import apple_voice
+        url = self._apple_sharded(3)
+        prefix = f"/b/{self.cj.tmp_prefix(url)}/"
+        parts = [p for p in self.got["put_paths"] if p.startswith(prefix)]
+        self.assertEqual(sorted(parts), [prefix + f"apple-{i}.zip" for i in range(3)], "кожен сервер поклав свою частину")
+        self.assertEqual(self.got["put"], 4, "3 частини + готова книга")
+        self.assertEqual([r.get("p_status") for r in self.got["rpc"] if "p_status" in r], ["running"] * 3 + ["done"])
+        self.assertIn("reader_book_ready", self.got["rpc_names"])
+        self.assertEqual(sorted(self.got["delete"]), sorted([p for p in parts] + ["/b/in/tok/book.epub"]), "тимчасові частини і вхідний EPUB прибрано")
+        book = [v for k, v in self.got["objects"].items() if k.endswith(".audiobook.zip")]
+        self.assertEqual(len(book), 1)
+        z = zipfile.ZipFile(io.BytesIO(book[0]))
+        man = json.loads(z.read("manifest.json"))
+        self.assertEqual([c["title"] for c in man["chapters"]], ["Розділ перший", "Глава вторая"])
+        self.assertTrue(man["text"])
+        self.assertNotIn("tmp/", json.dumps(self.got["rpc"]), "у читалку не йде посилання на тимчасові файли")
+
+    def test_apple_join_fails_when_part_missing(self):
+        with self.assertRaises(RuntimeError):
+            self._apple_sharded(2, fail_join_part=1)
+        self.assertEqual(self.got["rpc"][-1]["p_status"], "failed")
+        self.assertIn("частина 2 з 2", self.got["rpc"][-1]["p_err"])
+
+    def test_apple_cleanup_only_deletes_tmp(self):
+        url = "https://files.example/b/in/tok/book.epub"
+        os.environ.update({"GENDER": "apple", "STAGE": "apple-cleanup", "SHARDS": "5", "EPUB_URL": url, "JOB_ID": "3"})
+        self.addCleanup(lambda: [os.environ.pop(k, None) for k in ("GENDER", "STAGE", "SHARDS", "JOB_ID")])
+        with redirect_stdout(io.StringIO()):
+            self.cj.main()
+        self.assertEqual(self.got["delete"], [f"/b/{self.cj.tmp_prefix(url)}/apple-{i}.zip" for i in range(5)])
+        self.assertEqual(self.got["rpc"], [], "стан задачі не чіпає (це робить окремий крок)")
+
+    def test_bad_shard_numbers_refused(self):
+        with self.assertRaises(SystemExit):
+            self.cj.shards_from_env({"SHARD": "5", "SHARDS": "5"})
+        self.assertEqual(self.cj.shards_from_env({}), (0, 1))
 
     def test_apple_synth_failure_marks_failed_and_deletes_input(self):
         import shutil, unittest.mock as mock
@@ -1051,6 +1116,23 @@ class AppleVoice(unittest.TestCase):
         with redirect_stdout(io.StringIO()):
             edge = zipfile.ZipFile(T.convert(self.epub, os.path.join(self.dir, "edge")))
         self.assertEqual(json.loads(edge.read("manifest.json"))["id"], man["id"], "та сама книга має той самий id (прогрес у плеєрі)")
+
+    def test_shards_cover_all_segments_evenly_and_in_order(self):
+        tasks = [(f"{i:04d}.m4a", "Lesya", "а" * (100 + (i * 37) % 900)) for i in range(400)]
+        for n in (1, 2, 3, 5):
+            got = [self.A.shard_tasks(tasks, k, n) for k in range(n)]
+            self.assertEqual([t for g in got for t in g], tasks, "усі сегменти рівно по разу, суцільними відрізками")
+            sizes = [sum(len(t[2]) for t in g) for g in got]
+            self.assertLess(max(sizes) - min(sizes), 2000, f"частки рівні за символами: {sizes}")
+        self.assertEqual(self.A.shard_tasks(tasks[:2], 4, 5), [], "на малій книзі зайвий сервер просто нічого не пише")
+
+    def test_sharded_synth_writes_only_own_part_but_full_plan(self):
+        with redirect_stdout(io.StringIO()):
+            plan = self.A.synth(self.epub, os.path.join(self.dir, "s1"), jobs=2, say=FAKE_SAY, shard=1, shards=2)
+        mine = [t[0] for t in self.A.shard_tasks(self.A.build_plan(self.epub)[1], 1, 2)]
+        files = sorted(f for f in os.listdir(os.path.join(self.dir, "s1")) if f.endswith(".m4a"))
+        self.assertEqual(files, sorted(mine))
+        self.assertEqual(plan, self.A.build_plan(self.epub)[0], "план повний на кожному сервері")
 
     def test_pack_refuses_when_parts_missing(self):
         plan = self.synth()
