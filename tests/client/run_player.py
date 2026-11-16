@@ -67,6 +67,15 @@ def wrap_clicks(pg):
             orig(sel, *a, **k)
     pg.click = click
 
+def on_dlg(pg, accept):
+    # власне вікно підтвердження (#dlg): одноразово відповісти «так»/«ні», щойно воно відкриється, і запам'ятати текст
+    pg.evaluate('''a => { const d = document.getElementById('dlg'); window.__dlgMsgs = [];
+      const fire = () => { if (!d.classList.contains('open')) return false;
+        (window.__dlgMsgs = window.__dlgMsgs || []).push(document.getElementById('dlgText').textContent);
+        setTimeout(() => document.getElementById(a ? 'dlgOk' : 'dlgCancel').click(), 30); return true; };
+      if (fire()) return;
+      const mo = new MutationObserver(() => { if (fire()) mo.disconnect(); }); mo.observe(d, { attributes: true }); }''', accept)
+def take_dlg(pg): return pg.evaluate("(window.__dlgMsgs || []).splice(0)")
 def label_is(pg, n): pg.wait_for_function("n => document.getElementById('pChapter').textContent.startsWith(n + ' з 3')", arg=str(n), timeout=8000)
 def set_time(pg, t): pg.evaluate("t => { document.getElementById('audio').currentTime = t; }", t)
 def now(pg): return js(pg, AUDIO + '.currentTime')
@@ -296,7 +305,7 @@ with sync_playwright() as p:
     # --- видалення ---
     pg.click('.book')
     pg.wait_for_selector('#player', state='visible')
-    pg.once('dialog', lambda dlg: dlg.accept())
+    on_dlg(pg, True)
     pg.click('#moreBtn'); pg.click('#delBtn')
     pg.wait_for_selector('#library', state='visible')
     pg.wait_for_function("document.getElementById('books').textContent.includes('Поки порожньо')", timeout=5000)
@@ -323,7 +332,7 @@ with sync_playwright() as p:
     pg.reload(); pg.wait_for_selector('.book')
     check('обкладинка переживає перезапуск', 'blob:' in js(pg, "document.querySelector('.book .art').style.background"))
     pg.click('.book'); pg.wait_for_selector('#player', state='visible')
-    pg.click('#moreBtn'); pg.once('dialog', lambda dlg: dlg.accept()); pg.click('#delBtn')
+    pg.click('#moreBtn'); on_dlg(pg, True); pg.click('#delBtn')
     pg.wait_for_selector('#library', state='visible')
 
     # --- додавання за посиланням ---
@@ -382,6 +391,20 @@ with sync_playwright() as p:
     check('текст іде за звуком у наступний розділ', True)
     pg.click('#sheetText .bg', position={'x': 5, 'y': 5})
     check('вікно тексту закривається', not pg.is_visible('#sheetText .body'))
+    # панель закривається, якщо потягнути її вниз за «ручку»
+    DRAG = '''([sel, dy]) => { const b = document.querySelector(sel + ' .body'), g = b.querySelector('.grab'), r = g.getBoundingClientRect();
+      const x = r.left + r.width / 2, y0 = r.top + 2;
+      const ev = (n, y) => { const t = new Touch({ identifier: 1, target: g, clientX: x, clientY: y });
+        g.dispatchEvent(new TouchEvent(n, { bubbles: true, cancelable: true, touches: n === 'touchend' ? [] : [t], changedTouches: [t] })); };
+      ev('touchstart', y0); for (let i = 1; i <= 8; i++) ev('touchmove', y0 + dy * i / 8); ev('touchend', y0 + dy); }'''
+    pg.click('#speedBtn'); pg.evaluate(DRAG, ['#sheetSpeed', 40]); pg.wait_for_timeout(350)
+    check('короткий рух не закриває панель', pg.is_visible('#sheetSpeed .body'))
+    pg.evaluate(DRAG, ['#sheetSpeed', 200]); pg.wait_for_timeout(350)
+    check('панель закривається, якщо потягнути вниз', not pg.is_visible('#sheetSpeed .body'))
+    pg.click('#speedBtn'); pg.wait_for_timeout(100)
+    check('під відкритою панеллю сторінка не прокручується', js(pg, "document.documentElement.classList.contains('lock')"))
+    check('після закриття панель відкривається на місці', pg.is_visible('#sheetSpeed .body') and js(pg, "document.querySelector('#sheetSpeed .body').style.transform") == '')
+    pg.click('#sheetSpeed .bg', position={'x': 5, 'y': 5})
 
     # --- озвучка в хмарі: код, вибір EPUB, завантаження, запуск, список готових ---
     API = 'https://hikzqzdulvekuplolymw.supabase.co/functions/v1/reader-voice'
@@ -428,12 +451,13 @@ with sync_playwright() as p:
     check('не-EPUB відхиляється', len([c for c in vcalls if c['action'] == 'presign']) == 0)
     pg.click('#vgM')
     dlg_msgs = []
-    pg.once('dialog', lambda dlg: (dlg_msgs.append(dlg.message), dlg.dismiss()))
+    on_dlg(pg, False)
     pg.set_input_files('#voiceFile', epub)
     pg.wait_for_timeout(800)
-    check('перед запуском показується оцінка й можна відмовитись', len(dlg_msgs) == 1 and 'звуку' in dlg_msgs[0] and 'хв безкоштовного ліміту' in dlg_msgs[0]
+    dlg_msgs[:] = take_dlg(pg)
+    check('перед запуском показується оцінка й можна відмовитись', len(dlg_msgs) == 1 and 'звуку' in dlg_msgs[0] and 'Буде готова приблизно за' in dlg_msgs[0] and 'ліміт' not in dlg_msgs[0]
           and not any(c['action'] in ('presign', 'run') for c in vcalls), dlg_msgs)
-    pg.once('dialog', lambda dlg: dlg.accept())
+    on_dlg(pg, True)
     pg.set_input_files('#voiceFile', epub)
     pg.wait_for_function("document.getElementById('voiceStatus').textContent.includes('запущено')", timeout=10000)
     run = [c for c in vcalls if c['action'] == 'run'][0]
@@ -443,10 +467,10 @@ with sync_playwright() as p:
     pg.wait_for_function("document.getElementById('voiceJobs').textContent.includes('озвучується')", timeout=8000)
     check('активна задача видна у списку', True)
     pg.wait_for_selector('#voiceJobs .vrow button')
-    pg.once('dialog', lambda dlg: dlg.dismiss())
+    on_dlg(pg, False)
     pg.click('#voiceJobs .vrow button'); pg.wait_for_timeout(300)
     check('відмова від скасування нічого не скасовує', not any(c['action'] == 'cancel' for c in vcalls))
-    pg.once('dialog', lambda dlg: dlg.accept())
+    on_dlg(pg, True)
     pg.click('#voiceJobs .vrow button')
     pg.wait_for_function("document.getElementById('voiceJobs').children.length === 0", timeout=8000)
     cc = [c for c in vcalls if c['action'] == 'cancel']
@@ -464,10 +488,10 @@ with sync_playwright() as p:
     check('«Додати» з готових імпортує книгу за посиланням', not pg.is_visible('#sheetVoice .body'))
     pg.click('#addBtn'); pg.wait_for_selector('#voiceBooks .vrow')
     check('біля «Додати» є «Видалити»', pg.locator('#voiceBooks .vrow button').count() == 2 and pg.locator('#voiceBooks .vrow button').nth(1).inner_text() == 'Видалити')
-    pg.once('dialog', lambda dlg: dlg.dismiss())
+    on_dlg(pg, False)
     pg.locator('#voiceBooks .vrow button').nth(1).click(); pg.wait_for_timeout(300)
     check('скасування підтвердження нічого не видаляє', not any(c['action'] == 'delete' for c in vcalls))
-    pg.once('dialog', lambda dlg: dlg.accept())
+    on_dlg(pg, True)
     pg.locator('#voiceBooks .vrow button').nth(1).click()
     pg.wait_for_function("document.getElementById('voiceBooks').children.length === 0", timeout=8000)
     dc = [c for c in vcalls if c['action'] == 'delete']
@@ -498,9 +522,10 @@ with sync_playwright() as p:
     n0 = len([c for c in vcalls if c['action'] == 'progress_get'])
     pg.evaluate("bookDone = () => 0")
     msgs = []
-    pg.once('dialog', lambda dlg: (msgs.append(dlg.message), dlg.accept()))
+    on_dlg(pg, True)
     pg.click('.book')
     pg.wait_for_function("document.getElementById('pChapter').textContent.startsWith('3 з 3')", timeout=8000)
+    msgs[:] = take_dlg(pg)
     check('синхронізація: питає про перехід на іншу позицію', len(msgs) == 1 and 'Тест' in msgs[0] and '0:38' in msgs[0], msgs)
     check('синхронізація: запит позиції з профілем і книгою', any(c['action'] == 'progress_get' and c['profile'] == 'Тест' for c in vcalls[n0:]))
     pg.wait_for_function("document.getElementById('playBtn').dataset.state === 'playing'", timeout=8000)   # тап по книзі одразу грає
@@ -531,9 +556,10 @@ with sync_playwright() as p:
     pg.locator('#forChips button').nth(0).click()
     check('вибір «Тільки я» запам\'ятовується', js(pg, "localStorage.getItem('voiceFor')") == 'ksenia')
     dm = []
-    pg.once('dialog', lambda dlg: (dm.append(dlg.message), dlg.accept()))
+    on_dlg(pg, True)
     pg.set_input_files('#voiceFile', epub)
     pg.wait_for_function("document.getElementById('voiceStatus').textContent.includes('запущено')", timeout=10000)
+    dm[:] = take_dlg(pg)
     runs = [c for c in vcalls if c['action'] == 'run']
     check('запуск несе «для кого» (мені)', runs[-1].get('for') == 'ksenia', runs[-1])
     check('в оцінці перед запуском видно, для кого', dm and 'тільки ви' in dm[0], dm)
