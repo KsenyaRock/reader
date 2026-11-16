@@ -624,9 +624,9 @@ async function epubChars(file) {   // скільки тексту в EPUB (пр�
   }
   return chars;
 }
-function voiceEstimate(chars, gender) {   // ≈15 символів на секунду звуку; очікування: Edge ~72× реального часу, Apple на 5 серверах ~70×, плюс запуск
+function voiceEstimate(chars, gender) {   // ≈15 символів на секунду звуку; очікування (виміри 11.2026): Edge ≈16× реального часу, Apple на 5 серверах ≈90×, плюс запуск
   const audio = chars / 15;
-  const mins = gender === "apple" ? audio / 70 / 60 + 4 : audio / 72 / 60 + 2;
+  const mins = gender === "apple" ? audio / 90 / 60 + 4 : audio / 16 / 60 + 2;
   return { audio, mins: Math.max(5, Math.round(mins / 5) * 5) };
 }
 const VOICE_NAME = { female: "жіночий", male: "чоловічий", apple: "Apple" };
