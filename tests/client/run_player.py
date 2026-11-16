@@ -382,6 +382,19 @@ with sync_playwright() as p:
     check('текст іде за звуком у наступний розділ', True)
     pg.click('#sheetText .bg', position={'x': 5, 'y': 5})
     check('вікно тексту закривається', not pg.is_visible('#sheetText .body'))
+    # панель закривається, якщо потягнути її вниз за «ручку»
+    DRAG = '''([sel, dy]) => { const b = document.querySelector(sel + ' .body'), g = b.querySelector('.grab'), r = g.getBoundingClientRect();
+      const x = r.left + r.width / 2, y0 = r.top + 2;
+      const ev = (n, y) => { const t = new Touch({ identifier: 1, target: g, clientX: x, clientY: y });
+        g.dispatchEvent(new TouchEvent(n, { bubbles: true, cancelable: true, touches: n === 'touchend' ? [] : [t], changedTouches: [t] })); };
+      ev('touchstart', y0); for (let i = 1; i <= 8; i++) ev('touchmove', y0 + dy * i / 8); ev('touchend', y0 + dy); }'''
+    pg.click('#speedBtn'); pg.evaluate(DRAG, ['#sheetSpeed', 40]); pg.wait_for_timeout(350)
+    check('короткий рух не закриває панель', pg.is_visible('#sheetSpeed .body'))
+    pg.evaluate(DRAG, ['#sheetSpeed', 200]); pg.wait_for_timeout(350)
+    check('панель закривається, якщо потягнути вниз', not pg.is_visible('#sheetSpeed .body'))
+    pg.click('#speedBtn'); pg.wait_for_timeout(100)
+    check('після закриття панель відкривається на місці', pg.is_visible('#sheetSpeed .body') and js(pg, "document.querySelector('#sheetSpeed .body').style.transform") == '')
+    pg.click('#sheetSpeed .bg', position={'x': 5, 'y': 5})
 
     # --- озвучка в хмарі: код, вибір EPUB, завантаження, запуск, список готових ---
     API = 'https://hikzqzdulvekuplolymw.supabase.co/functions/v1/reader-voice'
@@ -431,7 +444,7 @@ with sync_playwright() as p:
     pg.once('dialog', lambda dlg: (dlg_msgs.append(dlg.message), dlg.dismiss()))
     pg.set_input_files('#voiceFile', epub)
     pg.wait_for_timeout(800)
-    check('перед запуском показується оцінка й можна відмовитись', len(dlg_msgs) == 1 and 'звуку' in dlg_msgs[0] and 'хв безкоштовного ліміту' in dlg_msgs[0]
+    check('перед запуском показується оцінка й можна відмовитись', len(dlg_msgs) == 1 and 'звуку' in dlg_msgs[0] and 'Буде готова приблизно за' in dlg_msgs[0] and 'ліміт' not in dlg_msgs[0]
           and not any(c['action'] in ('presign', 'run') for c in vcalls), dlg_msgs)
     pg.once('dialog', lambda dlg: dlg.accept())
     pg.set_input_files('#voiceFile', epub)
