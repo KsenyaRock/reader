@@ -1,6 +1,6 @@
 // Кеш оболонки для роботи без інтернету. Спершу мережа (щоб оновлення з'являлись одразу), якщо її немає, береться кеш.
 // Аудіо лежить в IndexedDB, не тут.
-const CACHE = "reader-shell-v0.13.4";
+const CACHE = "reader-shell-v0.13.6";
 const SHELL = ["./", "index.html", "manifest.webmanifest", "icon-180.png", "icon-192.png", "icon-512.png"];
 self.addEventListener("install", e => { e.waitUntil(caches.open(CACHE).then(c => c.addAll(SHELL)).then(() => self.skipWaiting())); });
 self.addEventListener("activate", e => {

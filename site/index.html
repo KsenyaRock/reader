@@ -265,7 +265,7 @@ h1{font-size:32px;font-weight:800;letter-spacing:-.02em;margin:0}
 
 <script>
 "use strict";
-const VERSION = "0.13.4";
+const VERSION = "0.13.6";
 const $ = id => document.getElementById(id);
 
 /* ---------- читання zip без завантаження в пам'ять ---------- */
@@ -987,7 +987,7 @@ function renderChapters() {
 }
 
 function updateChapterUI(force) {
-  if (!cur || !offs.length) return;
+  if (!cur || !offs.length || soft) return;
   const T = audio.currentTime || 0;
   const i = chapterAt(T);
   if (i !== curCh || force) {
@@ -1089,27 +1089,45 @@ $("seek").onchange = e => {
 };
 
 // «Тиха пауза» у фоні: iOS після справжньої паузи при погашеному екрані не відновлює звук (play() вдається, а час стоїть;
-// журнали 16.11.2026), тому на команду «пауза» з навушників звук лише вимикаємо (muted), а доріжка тихо крутиться біля того самого місця.
-// «Грати» повертає на збережену позицію й вмикає звук. Через 10 хв або коли екран увімкнено, тиха пауза стає справжньою.
+// журнали 16.11.2026), а з вимкненим звуком (muted) прибирає плеєр з екрана блокування. Тому на «паузу» з навушників у фоні
+// той самий елемент перемикається на доріжку тиші, що грає по колу (аудіосесія жива), а «грати» повертає книгу на збережене місце.
+// Через 15 хв або коли екран увімкнено, тиха пауза стає справжньою.
 let soft = null;   // { t0, timer }
-const SOFT_MAX = 10 * 60 * 1000, SOFT_LOOP = 20;
+let softQuiet = null;
+const SOFT_MAX = 15 * 60 * 1000;
+function quietUrl() {   // 20 с тиші: WAV 8 кГц, 8 біт, моно
+  if (softQuiet) return softQuiet;
+  const n = 8000 * 20, b = new Uint8Array(44 + n), v = new DataView(b.buffer);
+  const str = (o, t) => { for (let i = 0; i < t.length; i++) b[o + i] = t.charCodeAt(i); };
+  str(0, "RIFF"); v.setUint32(4, 36 + n, true); str(8, "WAVEfmt "); v.setUint32(16, 16, true); v.setUint16(20, 1, true); v.setUint16(22, 1, true);
+  v.setUint32(24, 8000, true); v.setUint32(28, 8000, true); v.setUint16(32, 1, true); v.setUint16(34, 8, true); str(36, "data"); v.setUint32(40, n, true);
+  b.fill(128, 44);
+  return softQuiet = URL.createObjectURL(new Blob([b], { type: "audio/wav" }));
+}
 function softPauseStart() {
   const t0 = audio.currentTime || 0;
   if (cur && ready) { cur.pos = { t: t0 }; putBook(cur).catch(() => {}); cloudPush(true); }
-  audio.muted = true;
-  soft = { t0, timer: setTimeout(() => softPauseEnd(false, "минуло 10 хв"), SOFT_MAX) };
+  soft = { t0, timer: setTimeout(() => softPauseEnd(false, "минуло 15 хв"), SOFT_MAX) };
   log(`тиха пауза у фоні на ${t0.toFixed(1)}`);
-  onPlayState();
+  audio.loop = true; audio.src = quietUrl();
+  audio.play().then(() => log("тиха пауза: тиша грає")).catch(e => log("тиха пауза: тиша не запустилась: " + (e && e.name)));
+  setPlayState(true); updateMini();
+  if ("mediaSession" in navigator) navigator.mediaSession.playbackState = "paused";
 }
 function softPauseEnd(play, why) {
   if (!soft) return;
-  const t0 = soft.t0; clearTimeout(soft.timer); soft = null;
-  if (!play) audio.pause();
-  const unmute = () => { audio.muted = false; };
-  if (play) { audio.addEventListener("seeked", unmute, { once: true }); setTimeout(unmute, 500); } else unmute();
-  try { audio.currentTime = t0; } catch (e) {}
+  const t0 = soft.t0; clearTimeout(soft.timer);
   log(`тиха пауза: ${play ? "грати далі" : "справжня пауза"} з ${t0.toFixed(1)}${why ? " (" + why + ")" : ""}`);
-  onPlayState();
+  audio.loop = false;
+  if (!streamUrl || !cur) { soft = null; return; }
+  const done = () => {
+    try { audio.currentTime = t0; audio.playbackRate = speed; } catch (e) {}
+    soft = null;
+    if (play) audio.play().then(() => log("тиха пауза: книга грає")).catch(e => { log("тиха пауза: книга не запустилась: " + (e && e.name)); onPlayState(); });
+    onPlayState();
+  };
+  audio.addEventListener("loadedmetadata", done, { once: true });
+  audio.src = streamUrl; audio.load();
 }
 async function saveProgress(force) {
   if (!cur || !ready || soft) return;
@@ -1148,11 +1166,11 @@ async function cloudPull(book) {   // перед стартом питаємо, 
 }
 
 audio.addEventListener("timeupdate", () => {
-  if (soft) { if (audio.currentTime > soft.t0 + SOFT_LOOP) { try { audio.currentTime = soft.t0; } catch (e) {} } return; }
+  if (soft) return;
   updateChapterUI(); saveProgress(false); checkChapterSleep(); });
 audio.addEventListener("play", () => { log("play"); onPlayState(); });
-audio.addEventListener("pause", () => { log("pause"); if (soft) softPauseEnd(false, "звук зупинено"); onPlayState(); saveProgress(true); });
-audio.addEventListener("ended", () => { log("ended (кінець книги)"); onPlayState(); if (cur && ready) { cur.pos = { t: total }; saveProgress(true); } });
+audio.addEventListener("pause", () => { log("pause"); if (soft) return; onPlayState(); saveProgress(true); });
+audio.addEventListener("ended", () => { if (soft) return; log("ended (кінець книги)"); onPlayState(); if (cur && ready) { cur.pos = { t: total }; saveProgress(true); } });
 audio.addEventListener("seeked", () => { saveProgress(true); updateChapterUI(); });
 audio.addEventListener("waiting", () => log("waiting"));
 audio.addEventListener("stalled", () => log("stalled"));
@@ -1167,6 +1185,7 @@ function onPlayState() {
 
 function leaveBook(save = true, render = true) {
   closeSheets();
+  if (soft) { clearTimeout(soft.timer); soft = null; audio.loop = false; }
   audio.pause();
   if (save) saveProgress(true);
   clearSleep();
@@ -1280,9 +1299,15 @@ function updateMediaPosition() {
 const MS = {};   // обробники команд ззовні (для тестів)
 if ("mediaSession" in navigator) {
   const ms = navigator.mediaSession;
-  // під час тихої паузи перемотки рахуємо від збереженого місця, а не від того, де тихо крутиться доріжка
+  // під час тихої паузи «−15/+30» зсувають збережене місце, решта перемоток чекає на «грати»
   const set = (a, f) => {
-    const h = a === "play" || a === "pause" || a === "stop" ? f : d => { if (!soft) return f(d); try { audio.currentTime = soft.t0; } catch (e) {} f(d); if (soft) soft.t0 = audio.currentTime; };
+    const h = a === "play" || a === "pause" || a === "stop" ? f : d => {
+      if (!soft) return f(d);
+      if (a === "seekbackward") soft.t0 = Math.max(0, soft.t0 - (d && d.seekOffset || 15));
+      else if (a === "seekforward") soft.t0 = Math.min(Math.max(0, total - 1), soft.t0 + (d && d.seekOffset || 30));
+      else return;
+      if (cur) cur.pos = { t: soft.t0 };
+    };
     MS[a] = h;
     try { ms.setActionHandler(a, h); } catch (e) {}
   };
