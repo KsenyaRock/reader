@@ -1,0 +1,39 @@
+name: pages
+
+# Публікує папку site/ у Cloudflare Pages (проєкт chytalka, акаунт Антона).
+# Гілки: main -> https://chytalka.pages.dev (production), dev -> https://dev.chytalka.pages.dev (прев'ю).
+# Секрети репозиторію (Settings -> Secrets and variables -> Actions):
+#   CLOUDFLARE_API_TOKEN  - токен Cloudflare лише з правом «Cloudflare Pages: Edit»
+#   CLOUDFLARE_ACCOUNT_ID - ID акаунта Cloudflare (не секретний, але зберігається там само)
+on:
+  push:
+    branches: [main, dev]
+    paths: ['site/**', '.github/workflows/pages.yml']
+  workflow_dispatch:
+
+concurrency:
+  group: pages-${{ github.ref_name }}
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    name: Cloudflare Pages
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    env:
+      HAS_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN != '' }}
+    steps:
+      - name: Немає секрету
+        if: env.HAS_TOKEN != 'true'
+        run: echo "::warning::Секрет CLOUDFLARE_API_TOKEN не задано, публікацію пропущено"
+      - uses: actions/checkout@v4
+        if: env.HAS_TOKEN == 'true'
+      - name: Публікація site/
+        if: env.HAS_TOKEN == 'true'
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: pages deploy site --project-name=chytalka --branch=${{ github.ref_name }} --commit-dirty=true
