@@ -265,7 +265,7 @@ h1{font-size:32px;font-weight:800;letter-spacing:-.02em;margin:0}
 
 <script>
 "use strict";
-const VERSION = "0.13.5";
+const VERSION = "0.13.6";
 const $ = id => document.getElementById(id);
 
 /* ---------- читання zip без завантаження в пам'ять ---------- */
@@ -1091,10 +1091,10 @@ $("seek").onchange = e => {
 // «Тиха пауза» у фоні: iOS після справжньої паузи при погашеному екрані не відновлює звук (play() вдається, а час стоїть;
 // журнали 16.11.2026), а з вимкненим звуком (muted) прибирає плеєр з екрана блокування. Тому на «паузу» з навушників у фоні
 // той самий елемент перемикається на доріжку тиші, що грає по колу (аудіосесія жива), а «грати» повертає книгу на збережене місце.
-// Через 10 хв або коли екран увімкнено, тиха пауза стає справжньою.
+// Через 15 хв або коли екран увімкнено, тиха пауза стає справжньою.
 let soft = null;   // { t0, timer }
 let softQuiet = null;
-const SOFT_MAX = 10 * 60 * 1000;
+const SOFT_MAX = 15 * 60 * 1000;
 function quietUrl() {   // 20 с тиші: WAV 8 кГц, 8 біт, моно
   if (softQuiet) return softQuiet;
   const n = 8000 * 20, b = new Uint8Array(44 + n), v = new DataView(b.buffer);
@@ -1107,7 +1107,7 @@ function quietUrl() {   // 20 с тиші: WAV 8 кГц, 8 біт, моно
 function softPauseStart() {
   const t0 = audio.currentTime || 0;
   if (cur && ready) { cur.pos = { t: t0 }; putBook(cur).catch(() => {}); cloudPush(true); }
-  soft = { t0, timer: setTimeout(() => softPauseEnd(false, "минуло 10 хв"), SOFT_MAX) };
+  soft = { t0, timer: setTimeout(() => softPauseEnd(false, "минуло 15 хв"), SOFT_MAX) };
   log(`тиха пауза у фоні на ${t0.toFixed(1)}`);
   audio.loop = true; audio.src = quietUrl();
   audio.play().then(() => log("тиха пауза: тиша грає")).catch(e => log("тиха пауза: тиша не запустилась: " + (e && e.name)));
