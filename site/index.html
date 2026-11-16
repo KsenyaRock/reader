@@ -265,7 +265,7 @@ h1{font-size:32px;font-weight:800;letter-spacing:-.02em;margin:0}
 
 <script>
 "use strict";
-const VERSION = "0.13.2";
+const VERSION = "0.13.3";
 const $ = id => document.getElementById(id);
 
 /* ---------- читання zip без завантаження в пам'ять ---------- */
@@ -1256,18 +1256,52 @@ if ("mediaSession" in navigator) {
   const ms = navigator.mediaSession;
   const set = (a, f) => { try { ms.setActionHandler(a, f); } catch (e) {} };
   // команди з навушників, екрана блокування, годинника: пишемо в журнал; якщо iOS відхилив «грати», пробуємо ще раз
+  // iOS у фоні після паузи часом «грає» лише на словах: play() вдається, а час стоїть (журнал 16.11.2026).
+  // Тому після команди ззовні стежимо за часом і по черзі пробуємо оживити звук; повторне натискання «грати» теж запускає наступний крок.
+  let reviveT0 = 0, reviveStep = 0, reviveTimer = null, reviveAt = 0;
+  const reviveStop = () => { clearTimeout(reviveTimer); reviveTimer = null; reviveStep = 0; };
+  const reviveKick = () => {
+    if (!cur || audio.paused) { reviveStop(); return; }
+    if (audio.currentTime > reviveT0 + 0.2) { log("«грати»: звук пішов" + (reviveStep ? " після кроку " + reviveStep : "")); reviveStop(); return; }
+    reviveStep++;
+    const t0 = reviveT0;
+    if (reviveStep === 1) {
+      log("«грати»: час стоїть, крок 1: перемотка на місці");
+      try { audio.currentTime = t0 + 0.05; } catch (e) {}
+      audio.play().catch(e => log("крок 1: play відхилено: " + (e && e.name)));
+    } else if (reviveStep === 2) {
+      log("«грати»: час стоїть, крок 2: пауза й знову грати");
+      audio.pause();
+      audio.play().catch(e => log("крок 2: play відхилено: " + (e && e.name)));
+    } else if (reviveStep === 3 && streamUrl) {
+      log("«грати»: час стоїть, крок 3: перезавантаження звуку");
+      const rate = audio.playbackRate;
+      audio.addEventListener("loadedmetadata", () => {
+        try { audio.currentTime = t0; audio.playbackRate = rate; } catch (e) {}
+        audio.play().then(() => log("крок 3: play вдався")).catch(e => log("крок 3: play відхилено: " + (e && e.name)));
+      }, { once: true });
+      audio.src = streamUrl; audio.load();
+    } else { log("«грати»: оживити звук не вдалося"); reviveStop(); return; }
+    reviveAt = Date.now();
+    clearTimeout(reviveTimer); reviveTimer = setTimeout(reviveKick, 1500);
+  };
+  const reviveWatch = () => { reviveStop(); reviveT0 = audio.currentTime; reviveAt = Date.now(); reviveTimer = setTimeout(reviveKick, 1500); };
   const remotePlay = () => {
-    log(`команда «грати» (ззовні): paused=${audio.paused} ready=${audio.readyState} src=${audio.getAttribute("src") ? "є" : "немає"} hidden=${document.hidden}`);
+    log(`команда «грати» (ззовні): paused=${audio.paused} ready=${audio.readyState} src=${audio.getAttribute("src") ? "є" : "немає"} hidden=${document.hidden} t=${audio.currentTime.toFixed(1)}`);
     if (!cur) return;
+    if (!audio.paused) {   // вже «грає»: якщо час стоїть, це повторне натискання, робимо наступний крок одразу (таймери у фоні можуть спати)
+      if (reviveTimer && Date.now() - reviveAt > 700) reviveKick(); else if (!reviveTimer) reviveWatch();
+      return;
+    }
     const again = n => setTimeout(() => {
       if (!audio.paused || !cur) return;
-      audio.play().then(() => log("«грати»: повтор " + n + " вдався")).catch(e => { log(`«грати»: повтор ${n} відхилено: ${e && e.name}`); if (n < 3) again(n + 1); });
+      audio.play().then(() => { log("«грати»: повтор " + n + " вдався"); reviveWatch(); }).catch(e => { log(`«грати»: повтор ${n} відхилено: ${e && e.name}`); if (n < 3) again(n + 1); });
     }, 350 * n);
-    try { audio.play().catch(e => { log("«грати» відхилено: " + (e && e.name) + " " + (e && e.message || "")); again(1); }); }
+    try { audio.play().then(reviveWatch).catch(e => { log("«грати» відхилено: " + (e && e.name) + " " + (e && e.message || "")); again(1); }); }
     catch (e) { log("«грати»: помилка " + errText(e)); again(1); }
   };
   set("play", remotePlay);
-  set("pause", () => { log("команда «пауза» (ззовні)"); audio.pause(); });
+  set("pause", () => { log("команда «пауза» (ззовні)"); reviveStop(); audio.pause(); });
   set("stop", () => { log("команда «стоп» (ззовні)"); audio.pause(); });
   set("seekbackward", d => skip(-(d && d.seekOffset || 15)));
   set("seekforward", d => skip(d && d.seekOffset || 30));
