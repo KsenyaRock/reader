@@ -16,10 +16,24 @@
 @media (prefers-color-scheme:light){:root:not([data-theme=dark]){--bg:#f7f5f2;--card:#fff;--text:#17181c;--muted:#6c7079;--accent:#e0642b;--on-accent:#fff;--line:#17181c1a;--chip:#17181c14;--track:#17181c1f;--invert:#17181c;--on-invert:#fff;--glow:#f3dcc9;--shadow:0 8px 28px #3a2a1a26;--hero:#fff;color-scheme:light}}
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
 html,body{margin:0;background:var(--bg);color:var(--text);font:16px/1.4 -apple-system,"SF Pro Text",system-ui,sans-serif;touch-action:manipulation;-webkit-text-size-adjust:100%}
-body{padding:env(safe-area-inset-top) 0 calc(var(--lift) + env(safe-area-inset-bottom));min-height:100vh}
+body{padding:env(safe-area-inset-top) 0 calc(var(--lift) + env(safe-area-inset-bottom));min-height:100vh;min-height:100dvh}
 .wrap{max-width:520px;margin:0 auto;padding:0 20px}
 button{font:inherit;color:inherit;background:none;border:0;padding:0;cursor:pointer}
-button:active{opacity:.6}
+button{transition:transform .08s,opacity .08s}
+button:active{opacity:.6;transform:scale(.96)}
+html{overscroll-behavior-y:none}
+body{-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
+input,textarea,#textList{-webkit-user-select:text;user-select:text}
+html.lock,html.lock body{overflow:hidden}
+#dlg{position:fixed;inset:0;z-index:40;display:none;align-items:center;justify-content:center;padding:24px;background:#0009}
+#dlg.open{display:flex}
+#dlg .box{width:100%;max-width:360px;background:var(--card);border-radius:20px;padding:20px;box-shadow:var(--shadow)}
+#dlgText{white-space:pre-line;font-size:16px;line-height:1.4;margin:0 0 16px}
+#dlgInput{display:none;width:100%;font:inherit;font-size:16px;color:inherit;background:var(--chip);border:0;border-radius:12px;padding:12px;margin:0 0 16px}
+#dlg .btns{display:flex;gap:10px}
+#dlg .btns button{flex:1;padding:12px;border-radius:14px;font-weight:600;background:var(--chip)}
+#dlg .btns #dlgOk{background:var(--accent);color:var(--on-accent)}
+#dlg .btns #dlgOk.danger{background:#c0392b;color:#fff}
 svg{display:block}
 .libhead{display:flex;align-items:center;justify-content:space-between;padding-top:28px}
 h1{font-size:32px;font-weight:800;letter-spacing:-.02em;margin:0}
@@ -42,7 +56,7 @@ h1{font-size:32px;font-weight:800;letter-spacing:-.02em;margin:0}
 .book .s{color:var(--muted);font-size:13px;margin-top:2px}
 .empty{color:var(--muted);text-align:center;margin:60px 0}
 .status{color:var(--muted);font-size:13px;margin:10px 0;min-height:18px}
-#player{display:none;min-height:100vh;background:linear-gradient(180deg,var(--glow) 0%,var(--bg) 58%);margin:0 -20px;padding:0 24px calc(24px + var(--lift) + env(safe-area-inset-bottom))}
+#player{display:none;min-height:100vh;min-height:100dvh;background:linear-gradient(180deg,var(--glow) 0%,var(--bg) 58%);margin:0 -20px;padding:0 24px calc(24px + var(--lift) + env(safe-area-inset-bottom))}
 .ptop{display:flex;align-items:center;justify-content:space-between;height:52px;padding-top:12px}
 .ib{width:44px;height:44px;display:flex;align-items:center;justify-content:center;color:var(--text)}
 .ib.l{justify-content:flex-start}.ib.r{justify-content:flex-end}
@@ -74,7 +88,7 @@ h1{font-size:32px;font-weight:800;letter-spacing:-.02em;margin:0}
 .sheet{position:fixed;inset:0;z-index:20;display:none}
 .sheet.open{display:block}
 .sheet .bg{position:absolute;inset:0;background:#0009}
-.sheet .body{position:absolute;left:0;right:0;bottom:0;max-height:80vh;overflow:auto;background:var(--card);border-radius:24px 24px 0 0;padding:10px 20px calc(24px + var(--lift) + env(safe-area-inset-bottom));max-width:560px;margin:0 auto;box-shadow:var(--shadow)}
+.sheet .body{position:absolute;left:0;right:0;bottom:0;max-height:80vh;max-height:80dvh;overflow:auto;background:var(--card);border-radius:24px 24px 0 0;padding:10px 20px calc(24px + var(--lift) + env(safe-area-inset-bottom));max-width:560px;margin:0 auto;box-shadow:var(--shadow)}
 .grab{width:40px;height:4px;border-radius:2px;background:var(--track);margin:0 auto 14px;position:relative}
 .grab::after{content:"";position:absolute;left:-60px;right:-60px;top:-14px;bottom:-18px}
 .sheet .body{overscroll-behavior:contain}
@@ -106,7 +120,7 @@ h1{font-size:32px;font-weight:800;letter-spacing:-.02em;margin:0}
 #mini .mbtn{width:44px;height:44px;border-radius:22px;background:var(--accent);color:var(--on-accent);display:flex;align-items:center;justify-content:center}
 #mini[data-state=playing] .i-play,#mini[data-state=paused] .i-pause{display:none}
 #library.hasmini{padding-bottom:calc(96px + var(--lift))}
-#sheetText .body{max-height:90vh;height:90vh;display:flex;flex-direction:column;padding-bottom:calc(12px + env(safe-area-inset-bottom))}
+#sheetText .body{max-height:90vh;height:90vh;max-height:90dvh;height:90dvh;display:flex;flex-direction:column;padding-bottom:calc(12px + env(safe-area-inset-bottom))}
 #textHead{display:flex;align-items:center;gap:8px;margin-bottom:8px}
 #textHead h3{flex:1;margin:0;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:16px}
 #textHead button{min-width:40px;height:40px;border-radius:20px;background:var(--line);color:var(--text);font-size:16px;font-weight:600}
@@ -246,11 +260,12 @@ h1{font-size:32px;font-weight:800;letter-spacing:-.02em;margin:0}
   <button class="mbtn" id="miniBtn" aria-label="Грати/пауза"><svg class="i-play" width="20" height="20" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5.5v13a1 1 0 0 0 1.5.86l10.5-6.5a1 1 0 0 0 0-1.72L9.5 4.64A1 1 0 0 0 8 5.5Z"/></svg><svg class="i-pause" width="20" height="20" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="6" y="5" width="4" height="14" rx="1.2"/><rect x="14" y="5" width="4" height="14" rx="1.2"/></svg></button>
 </div>
 <div id="toast"></div>
+<div id="dlg" role="dialog" aria-modal="true"><div class="box"><p id="dlgText"></p><input id="dlgInput" autocomplete="off" maxlength="60"><div class="btns"><button id="dlgCancel">Скасувати</button><button id="dlgOk">OK</button></div></div></div>
 <audio id="audio" preload="auto" playsinline></audio>
 
 <script>
 "use strict";
-const VERSION = "0.13.1";
+const VERSION = "0.13.2";
 const $ = id => document.getElementById(id);
 
 /* ---------- читання zip без завантаження в пам'ять ---------- */
@@ -662,7 +677,7 @@ async function voiceRefresh() {
     if (t.status === "queued" || t.status === "running") {
       stop = document.createElement("button"); stop.className = "pill"; stop.textContent = "Скасувати";
       stop.onclick = async () => {
-        if (!confirm(`Скасувати озвучку «${t.title}»? Хвилини, які вже витрачені, не повернуться.`)) return;
+        if (!await ask(`Скасувати озвучку «${t.title}»?`, { ok: "Скасувати озвучку", cancel: "Ні", danger: true })) return;
         stop.disabled = true;
         try { await voiceCall("cancel", { id: t.id }); toast("Озвучку скасовано"); voiceRefresh(); }
         catch (e) { stop.disabled = false; toast("Не вдалося скасувати: " + errText(e)); }
@@ -676,7 +691,7 @@ async function voiceRefresh() {
     add.onclick = () => { closeSheets(); importFromUrl(b.link); };
     const del = document.createElement("button"); del.className = "pill"; del.textContent = "Видалити";
     del.onclick = async () => {
-      if (!confirm(`Видалити «${b.title}» з хмари назавжди? Копія в читалці на телефоні лишиться.`)) return;
+      if (!await ask(`Видалити «${b.title}» з хмари назавжди?\nКопія в читалці на телефоні лишиться.`, { ok: "Видалити", danger: true })) return;
       del.disabled = true;
       try { await voiceCall("delete", { id: b.id }); toast("Видалено з хмари"); voiceRefresh(); }
       catch (e) { del.disabled = false; toast("Не вдалося видалити: " + errText(e)); }
@@ -707,9 +722,9 @@ $("voiceSave").onclick = async () => {
   try { await voiceCall("check"); $("voiceCode").value = ""; voiceShow(); toast("Код прийнято"); }
   catch (e) { store.set("voiceCode", ""); toast(errText(e)); }
 };
-$("voiceProfile").onclick = () => {
+$("voiceProfile").onclick = async () => {
   if (PEOPLE.length) { store.set("me", ""); renderPeople(); return; }
-  const v = prompt("Ім'я профілю для синхронізації позиції між телефонами. На всіх ваших телефонах воно має бути однакове (наприклад, Анна), у різних людей різне. Порожньо: вимкнути.", store.get("profile"));
+  const v = await ask("Ім'я профілю для синхронізації позиції між телефонами. На всіх ваших телефонах воно має бути однакове (наприклад, Анна), у різних людей різне. Порожньо: вимкнути.", { input: store.get("profile"), ok: "Зберегти" });
   if (v === null) return;
   store.set("profile", v.trim().slice(0, 40)); voiceShow();
 };
@@ -737,7 +752,7 @@ $("voiceFile").onchange = async ev => {
     try { chars = await epubChars(file); } catch (e) { log("оцінка обсягу не вдалась: " + errText(e)); }
     if (chars > 3000) {
       const est = voiceEstimate(chars, voiceGender);
-      if (!confirm(`Книга ≈ ${durText(est.audio)} звуку.\nГолос: ${VOICE_NAME[voiceGender]}.${PEOPLE.length && meKey() ? "\nДля кого: " + (forKey() === "both" ? "обоє" : forKey() === meKey() ? "тільки ви" : personLabel(forKey())) + "." : ""}\nБуде готова приблизно за ${est.mins} хв, повідомлення прийде в Telegram.\n\nЗапустити?`)) {
+      if (!await ask(`Книга ≈ ${durText(est.audio)} звуку.\nГолос: ${VOICE_NAME[voiceGender]}.${PEOPLE.length && meKey() ? "\nДля кого: " + (forKey() === "both" ? "обоє" : forKey() === meKey() ? "тільки ви" : personLabel(forKey())) + "." : ""}\nБуде готова приблизно за ${est.mins} хв, повідомлення прийде в Telegram.\n\nЗапустити?`, { ok: "Запустити" })) {
         st.textContent = "Скасовано"; return;
       }
     }
@@ -931,7 +946,7 @@ async function openBook(id, autoplay) {
   setSpeed(speed);
   const blobs = await Promise.all(book.chapters.map(c => getBlob(`${book.id}/${c.file}`)));
   if (cur !== book) return;
-  if (blobs.some(b => !b)) { alert("Файли книги не знайдено. Додайте книгу ще раз."); leaveBook(false); return; }
+  if (blobs.some(b => !b)) { leaveBook(false); tell("Файли книги не знайдено. Додайте книгу ще раз."); return; }
   if (streamUrl) URL.revokeObjectURL(streamUrl);
   streamUrl = URL.createObjectURL(new Blob(blobs, { type: "audio/mpeg" }));
   const meta = once(audio, "loadedmetadata", "error");
@@ -939,7 +954,7 @@ async function openBook(id, autoplay) {
   audio.defaultPlaybackRate = speed; audio.playbackRate = speed;
   await meta;
   if (cur !== book) return;
-  if (audio.error) { alert("Не вдалося відкрити звук книги (код " + audio.error.code + ")"); log("помилка завантаження " + audio.error.code); leaveBook(false); return; }
+  if (audio.error) { const code = audio.error.code; log("помилка завантаження " + code); leaveBook(false); tell("Не вдалося відкрити звук книги (код " + code + ")"); return; }
   rescale(audio.duration);
   let t = bookDone(book);
   if (t >= total - 1) t = 0;
@@ -1104,7 +1119,7 @@ async function cloudPull(book) {   // перед стартом питаємо, 
     const r = await Promise.race([voiceCall("progress_get", { profile: store.get("profile"), book: book.id }), new Promise(res => setTimeout(() => res(null), 2500))]);
     const p = r && r.progress;
     if (p && cur === book && p.pos > bookDone(book) + 30 && p.pos < total - 1 &&
-        confirm(`На іншому телефоні (профіль «${store.get("profile")}») ви дослухали до ${fmt(p.pos)}${agoText(p.updated)}. Перейти туди?`)) seekTo(p.pos);
+        await ask(`На іншому телефоні (профіль «${store.get("profile")}») ви дослухали до ${fmt(p.pos)}${agoText(p.updated)}.\nПерейти туди?`, { ok: "Перейти", cancel: "Лишитись тут" }) && cur === book) seekTo(p.pos);
   } catch (e) { log("синхронізація: " + errText(e)); }
   finally { syncBlock = false; }
 }
@@ -1189,7 +1204,7 @@ $("coverInput").onchange = async ev => {
   } catch (e) { log("обкладинка: " + errText(e)); toast("Не вдалося: " + errText(e)); }
 };
 $("delBtn").onclick = async () => {
-  if (!cur || !confirm(`Видалити «${cur.title}» з телефону? Файл в iCloud лишиться.`)) return;
+  if (!cur || !await ask(`Видалити «${cur.title}» з телефону?\nЯкщо вона є в «Готові в хмарі», її можна буде додати знову.`, { ok: "Видалити", danger: true }) || !cur) return;
   const book = cur;
   leaveBook(false, false);
   for (const c of book.chapters) await delBlob(`${book.id}/${c.file}`);
@@ -1240,8 +1255,20 @@ function updateMediaPosition() {
 if ("mediaSession" in navigator) {
   const ms = navigator.mediaSession;
   const set = (a, f) => { try { ms.setActionHandler(a, f); } catch (e) {} };
-  set("play", () => audio.play());
-  set("pause", () => audio.pause());
+  // команди з навушників, екрана блокування, годинника: пишемо в журнал; якщо iOS відхилив «грати», пробуємо ще раз
+  const remotePlay = () => {
+    log(`команда «грати» (ззовні): paused=${audio.paused} ready=${audio.readyState} src=${audio.getAttribute("src") ? "є" : "немає"} hidden=${document.hidden}`);
+    if (!cur) return;
+    const again = n => setTimeout(() => {
+      if (!audio.paused || !cur) return;
+      audio.play().then(() => log("«грати»: повтор " + n + " вдався")).catch(e => { log(`«грати»: повтор ${n} відхилено: ${e && e.name}`); if (n < 3) again(n + 1); });
+    }, 350 * n);
+    try { audio.play().catch(e => { log("«грати» відхилено: " + (e && e.name) + " " + (e && e.message || "")); again(1); }); }
+    catch (e) { log("«грати»: помилка " + errText(e)); again(1); }
+  };
+  set("play", remotePlay);
+  set("pause", () => { log("команда «пауза» (ззовні)"); audio.pause(); });
+  set("stop", () => { log("команда «стоп» (ззовні)"); audio.pause(); });
   set("seekbackward", d => skip(-(d && d.seekOffset || 15)));
   set("seekforward", d => skip(d && d.seekOffset || 30));
   set("previoustrack", prevChapter);
@@ -1316,9 +1343,9 @@ function setPlayState(paused) {
   b.dataset.state = paused ? "paused" : "playing";
   b.setAttribute("aria-label", paused ? "Грати" : "Пауза");
 }
-function openSheet(id) { closeSheets(); $(id).classList.add("open"); }
-function closeSheets() { document.querySelectorAll(".sheet.open").forEach(s => s.classList.remove("open")); }
-document.querySelectorAll(".sheet .bg").forEach(bg => bg.onclick = closeSheets);
+function openSheet(id) { closeSheets(); $(id).classList.add("open"); lockScroll(); }
+function closeSheets() { document.querySelectorAll(".sheet.open").forEach(s => s.classList.remove("open")); lockScroll(); }
+document.querySelectorAll(".sheet .bg").forEach(bg => { bg.onclick = closeSheets; bg.addEventListener("touchmove", e => { if (e.cancelable) e.preventDefault(); }, { passive: false }); });
 // панель можна закрити, потягнувши її вниз: за «ручку»/заголовок завжди, за вміст лише коли він прокручений до верху
 document.querySelectorAll(".sheet .body").forEach(body => {
   let sy = 0, sx = 0, active = false, dragging = false;
@@ -1358,6 +1385,30 @@ document.addEventListener("keydown", e => { if (e.key === "Escape") closeSheets(
 $("speedBtn").onclick = () => openSheet("sheetSpeed");
 $("chapBtn").onclick = () => { openSheet("sheetChap"); const c = document.querySelector("#chapters .cur"); if (c) c.scrollIntoView({ block: "center" }); };
 $("moreBtn").onclick = () => openSheet("sheetMore");
+
+// власні вікна замість системних confirm/alert/prompt: ask() повертає true/false, а з полем введення рядок або null
+let dlgDone = null;
+function ask(text, o = {}) {
+  if (dlgDone) dlgDone(o.input !== undefined ? null : false);
+  return new Promise(res => {
+    const d = $("dlg"), inp = $("dlgInput"), ok = $("dlgOk"), no = $("dlgCancel");
+    $("dlgText").textContent = text;
+    ok.textContent = o.ok || "OK"; ok.classList.toggle("danger", !!o.danger);
+    no.textContent = o.cancel || "Скасувати"; no.style.display = o.alert ? "none" : "";
+    const withInput = o.input !== undefined;
+    inp.style.display = withInput ? "block" : "none"; inp.value = withInput ? o.input : "";
+    dlgDone = v => { dlgDone = null; d.classList.remove("open"); inp.blur(); lockScroll(); res(v); };
+    ok.onclick = () => dlgDone(withInput ? inp.value : true);
+    no.onclick = () => dlgDone(withInput ? null : false);
+    inp.onkeydown = e => { if (e.key === "Enter") ok.click(); };
+    d.classList.add("open"); lockScroll();
+  });
+}
+const tell = text => ask(text, { alert: true });
+$("dlg").addEventListener("click", e => { if (e.target === $("dlg") && dlgDone && $("dlgCancel").style.display !== "none") $("dlgCancel").click(); });
+$("dlg").addEventListener("touchmove", e => { if (e.target === $("dlg") && e.cancelable) e.preventDefault(); }, { passive: false });
+function lockScroll() { document.documentElement.classList.toggle("lock", !!document.querySelector(".sheet.open, #dlg.open")); }
+document.addEventListener("touchstart", () => {}, { passive: true });   // щоб :active спрацьовував на iOS
 
 let toastTimer = null;
 function toast(text) {
